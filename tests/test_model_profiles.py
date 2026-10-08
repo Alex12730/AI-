@@ -8,6 +8,7 @@ from video_workstation.models import ModelProfile
 from video_workstation.services.models import (
     ModelNotAdmitted,
     admit_generation,
+    configure_local_profile,
     record_benchmark,
     seed_model_profiles,
 )
@@ -75,3 +76,16 @@ def test_unlisted_duration_is_never_admitted(session):
     with pytest.raises(ModelNotAdmitted):
         admit_generation(h3, duration_seconds=15, aspect_ratio="16:9")
 
+
+def test_local_profile_configuration_is_an_auditable_argv_array(session):
+    seed_model_profiles(session)
+    h3 = session.query(ModelProfile).filter_by(slug="minimax-h3-fl2va").one()
+    configured = configure_local_profile(
+        h3,
+        command=["python", "/opt/ComfyUI/run_h3.py", "--prompt", "{prompt}", "--output", "{output}"],
+        version="H3-Base-2026-09",
+        quantization="pruned-int8-ampere",
+    )
+    assert configured.runtime_config_json["command"][0] == "python"
+    assert configured.model_version == "H3-Base-2026-09"
+    assert configured.quantization == "pruned-int8-ampere"

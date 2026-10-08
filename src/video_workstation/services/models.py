@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import ModelProfile
+from ..offline import validate_offline_profile
 
 
 class ModelNotAdmitted(ValueError):
@@ -106,6 +107,21 @@ def seed_model_profiles(session: Session) -> list[ModelProfile]:
         profiles.append(profile)
     session.flush()
     return profiles
+
+
+def configure_local_profile(
+    profile: ModelProfile,
+    *,
+    command: list[str],
+    version: str,
+    quantization: str,
+) -> ModelProfile:
+    profile.provider = "local"
+    profile.runtime_config_json = {"command": command}
+    profile.model_version = version.strip() or "unconfigured"
+    profile.quantization = quantization.strip() or "unconfigured"
+    validate_offline_profile(profile)
+    return profile
 
 
 def record_benchmark(

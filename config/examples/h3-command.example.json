@@ -1,0 +1,20 @@
+[
+  "python",
+  "/opt/ComfyUI/local_launchers/run_h3_fl2va.py",
+  "--prompt",
+  "{prompt}",
+  "--negative-prompt",
+  "{negative_prompt}",
+  "--output",
+  "{output}",
+  "--duration",
+  "{duration}",
+  "--aspect-ratio",
+  "{aspect_ratio}",
+  "--seed",
+  "{seed}",
+  "--first-frame",
+  "{first_frame}",
+  "--last-frame",
+  "{last_frame}"
+]
