@@ -117,27 +117,27 @@ Expected: PASS。
 - Consumes: Task 2 的 `available_profiles_by_shot: dict[str, list[ModelProfile]]`。
 - Produces: `POST /shots/{shot_id}/settings` 与 `POST /storyboards/{storyboard_id}/withdraw` 两个带 CSRF 的 HTML 表单端点。
 
-- [ ] **Step 1: 写失败的页面与表单测试**
+- [x] **Step 1: 写失败的页面与表单测试**
 
 断言草稿页包含每镜头时长/比例下拉框和保存按钮；设置表单保存后 303 返回项目页。断言待审批页显示“退回修改”，撤回后恢复草稿控件。断言批准页只列出匹配 Profile，表单使用镜头保存值；无匹配模型显示“暂无已验证模型”。
 
-- [ ] **Step 2: 验证测试按预期失败**
+- [x] **Step 2: 验证测试按预期失败**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests\test_operations.py tests\test_api.py -q`
 
 Expected: FAIL，因为页面仍只显示文本并硬编码 Demo 参数。
 
-- [ ] **Step 3: 实现路由、模板和最小样式**
+- [x] **Step 3: 实现路由、模板和最小样式**
 
 新增两个 HTML POST 路由并复用领域函数。草稿镜头使用原生 `<select>` 和提交按钮；待审批页按权限显示撤回按钮；批准页显示模型下拉框并把保存值放进入队表单。保留现有 JS入队反馈，仅适配模型 `<select>`；CSS只增加紧凑镜头设置布局和移动端单列规则。
 
-- [ ] **Step 4: 运行目标测试**
+- [x] **Step 4: 运行目标测试**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests\test_operations.py tests\test_api.py -q`
 
 Expected: PASS。
 
-- [ ] **Step 5: 更新 `.feedback` 并提交页面功能**
+- [x] **Step 5: 更新 `.feedback` 并提交页面功能**
 
 记录本任务的测试和摩擦点后提交：`feat: add shot preset controls`。
 

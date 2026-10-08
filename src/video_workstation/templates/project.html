@@ -6,6 +6,7 @@
   <div><h1>{{ project.name }}</h1><p>分镜 v{{ storyboard.version }} · <span class="badge badge-{{ storyboard.status }}"><i></i>{{ storyboard.status }}</span></p></div>
   <div class="header-actions">
     {% if storyboard.status == 'draft' %}<form method="post" action="/storyboards/{{ storyboard.id }}/submit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-primary" type="submit">提交审批</button></form>{% endif %}
+    {% if storyboard.status == 'pending_approval' and (user.role == 'admin' or user.id == project.created_by_id) %}<form method="post" action="/storyboards/{{ storyboard.id }}/withdraw"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary" type="submit">退回修改</button></form>{% endif %}
     {% if storyboard.status == 'pending_approval' and user.role == 'admin' %}<form method="post" action="/storyboards/{{ storyboard.id }}/approve"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-primary" type="submit">批准分镜</button></form>{% endif %}
   </div>
 </header>
@@ -17,13 +18,31 @@
   <div class="panel-heading"><div><h2 id="shots-title">镜头清单</h2><p>{{ storyboard.shots|length }} 个镜头，按顺序生成与返工</p></div></div>
   <div class="shot-list">{% for shot in storyboard.shots|sort(attribute='sequence_no') %}<article class="shot-row">
     <div class="shot-index">{{ '%02d'|format(shot.sequence_no) }}</div>
-    <div class="shot-main"><div class="shot-title"><h3>{{ shot.title }}</h3><span class="badge badge-neutral">{{ shot.scene_type }}</span></div><p>{{ shot.prompt }}</p><small>{{ shot.duration_seconds|int }} 秒 · {{ shot.aspect_ratio }}</small></div>
+    <div class="shot-main"><div class="shot-title"><h3>{{ shot.title }}</h3><span class="badge badge-neutral">{{ shot.scene_type }}</span></div><p>{{ shot.prompt }}</p>
+      {% if storyboard.status == 'draft' %}
+      <form class="shot-settings-form" method="post" action="/shots/{{ shot.id }}/settings">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>时长
+          <select name="duration_seconds">{% for duration in duration_presets %}<option value="{{ duration }}"{% if shot.duration_seconds == duration %} selected{% endif %}>{{ duration }} 秒</option>{% endfor %}</select>
+        </label>
+        <label>画幅
+          <select name="aspect_ratio">{% for ratio in aspect_ratios %}<option value="{{ ratio }}"{% if shot.aspect_ratio == ratio %} selected{% endif %}>{{ ratio }}</option>{% endfor %}</select>
+        </label>
+        <button class="button button-secondary" type="submit">保存镜头设置</button>
+      </form>
+      {% else %}<small>{{ shot.duration_seconds|int }} 秒 · {{ shot.aspect_ratio }}</small>{% endif %}
+    </div>
     <div class="shot-action">
       {% if storyboard.status == 'approved' %}
+      {% set shot_profiles = available_profiles_by_shot.get(shot.id, []) %}
+      {% if shot_profiles %}
       <form class="inline-form demo-enqueue" data-shot="{{ shot.id }}">
-        <input type="hidden" name="model_slug" value="demo"><input type="hidden" name="duration_seconds" value="5"><input type="hidden" name="aspect_ratio" value="16:9"><input type="hidden" name="priority" value="1"><input type="hidden" name="estimated_temp_bytes" value="1"><input type="hidden" name="seed" value="{{ shot.sequence_no }}">
-        <button class="button button-secondary" type="submit">Demo 入队</button>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>生成模型<select name="model_slug">{% for profile in shot_profiles %}<option value="{{ profile.slug }}">{{ profile.display_name }}{% if profile.adapter_type == 'demo' %}（演示）{% endif %}</option>{% endfor %}</select></label>
+        <input type="hidden" name="duration_seconds" value="{{ shot.duration_seconds|int }}"><input type="hidden" name="aspect_ratio" value="{{ shot.aspect_ratio }}"><input type="hidden" name="priority" value="1"><input type="hidden" name="estimated_temp_bytes" value="1"><input type="hidden" name="seed" value="{{ shot.sequence_no }}">
+        <button class="button button-secondary" type="submit">加入队列</button>
       </form>
+      {% else %}<span class="muted">暂无已验证模型</span>{% endif %}
       {% else %}<span class="muted">审批后可入队</span>{% endif %}
     </div>
   </article>{% endfor %}</div>

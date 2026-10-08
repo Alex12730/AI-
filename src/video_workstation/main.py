@@ -31,6 +31,8 @@ from .services.models import (
 )
 from .services.projects import (
     PermissionDenied,
+    SHOT_ASPECT_RATIOS,
+    SHOT_DURATION_PRESETS,
     approve_storyboard,
     assert_project_access,
     create_member,
@@ -40,6 +42,7 @@ from .services.projects import (
     submit_storyboard,
     update_draft_shot,
     validate_priority,
+    withdraw_storyboard,
 )
 from .storage import InsufficientStorage, StorageGuard, generated_asset_path
 
@@ -349,11 +352,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "storyboard": storyboard,
                 "profiles": profiles,
                 "available_profiles_by_shot": available_profiles_by_shot,
+                "duration_presets": SHOT_DURATION_PRESETS,
+                "aspect_ratios": SHOT_ASPECT_RATIOS,
                 "tasks": tasks,
                 "page": "projects",
                 "csrf_token": request.session["csrf"],
             },
         )
+
+    @app.post("/shots/{shot_id}/settings")
+    def update_shot_settings_form(
+        shot_id: str,
+        request: Request,
+        duration_seconds: float = Form(...),
+        aspect_ratio: str = Form(...),
+        csrf_token: str = Form(...),
+        session: Session = Depends(session_dependency),
+    ):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+        shot = session.get(Shot, shot_id)
+        if shot is None:
+            raise HTTPException(404, "镜头不存在")
+        try:
+            update_draft_shot(
+                session,
+                user,
+                shot,
+                title=shot.title,
+                prompt=shot.prompt,
+                duration_seconds=duration_seconds,
+                aspect_ratio=aspect_ratio,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/submit")
     def submit_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
@@ -377,6 +412,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if storyboard is None:
             raise HTTPException(404, "分镜不存在")
         approve_storyboard(session, user, storyboard)
+        return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
+
+    @app.post("/storyboards/{storyboard_id}/withdraw")
+    def withdraw_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+        storyboard = session.get(Storyboard, storyboard_id)
+        if storyboard is None:
+            raise HTTPException(404, "分镜不存在")
+        try:
+            withdraw_storyboard(session, user, storyboard)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.get("/queue", response_class=HTMLResponse)

@@ -123,6 +123,10 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
 .shot-main p { margin: .4rem 0; max-width: 72ch; }
 .shot-main small, .muted { color: var(--muted); }
 .shot-action { align-self: center; }
+.shot-settings-form { display: grid; grid-template-columns: minmax(110px, 140px) minmax(110px, 140px) auto; gap: .65rem; align-items: end; margin-top: .75rem; }
+.shot-settings-form select, .shot-action select { padding: .55rem .65rem; }
+.shot-settings-form .button { min-height: 39px; padding-block: .55rem; }
+.shot-action .inline-form { display: grid; gap: .6rem; min-width: 190px; }
 .notice-band { display: grid; grid-template-columns: 190px 1fr; gap: 1rem; margin-bottom: 1.25rem; padding: 1rem 1.15rem; border-radius: 12px; background: #273641; color: #f5f2eb; }
 .notice-band span { color: #c9d1d7; }
 .preset { display: inline-block; margin: .1rem; border-radius: 6px; background: var(--green-soft); color: var(--green); padding: .2rem .4rem; font-size: .72rem; }
@@ -174,6 +178,7 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
   .shot-row { grid-template-columns: 38px minmax(0, 1fr); }
   .shot-action { grid-column: 2; }
   .shot-action .button { width: 100%; }
+  .shot-settings-form { grid-template-columns: 1fr; }
   .login-body { padding: 0; }
   .login-shell { min-height: 100vh; grid-template-columns: 1fr; border-radius: 0; }
   .login-context { padding: 2rem 1.4rem; }

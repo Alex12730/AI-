@@ -16,11 +16,13 @@ document.addEventListener("submit", async (event) => {
   button.disabled = true;
   button.textContent = "正在入队…";
   const payload = Object.fromEntries(new FormData(form));
+  const csrfToken = payload.csrf_token || "";
+  delete payload.csrf_token;
   for (const key of ["duration_seconds", "priority", "estimated_temp_bytes", "seed"]) payload[key] = Number(payload[key]);
   try {
     const response = await fetch(`/api/shots/${form.dataset.shot}/enqueue`, {
       method: "POST",
-      headers: {"Content-Type": "application/json", "X-CSRF-Token": document.querySelector('input[name="csrf_token"]')?.value || ""},
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
       body: JSON.stringify(payload),
     });
     const data = await response.json();

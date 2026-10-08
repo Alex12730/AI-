@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from video_workstation.models import Asset, Project, Review, Task, User
+from video_workstation.models import Asset, ModelProfile, Project, Review, Task, User
 from video_workstation.worker import Worker
 
 from test_api import login, make_client
@@ -124,3 +124,65 @@ def test_acceptance_creates_review_and_traceable_archive_manifest(tmp_path):
         assert session.query(Review).filter_by(project_id=project["id"], status="accepted").count() == 1
         assert session.query(Asset).filter_by(project_id=project["id"], kind="archive_manifest").count() == 1
         assert session.get(Task, task["id"]).status == "succeeded"
+
+
+def test_project_page_edits_withdraws_and_matches_saved_shot_presets(tmp_path):
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "可选档位", "source_script": "环境空镜。"},
+    ).json()
+    shot_id = project["shots"][0]["id"]
+    csrf_token = client.headers["X-CSRF-Token"]
+
+    draft_page = client.get(f"/projects/{project['id']}")
+    assert draft_page.status_code == 200
+    assert 'name="duration_seconds"' in draft_page.text
+    assert 'name="aspect_ratio"' in draft_page.text
+    assert "保存镜头设置" in draft_page.text
+
+    saved = client.post(
+        f"/shots/{shot_id}/settings",
+        data={"duration_seconds": "20", "aspect_ratio": "9:16", "csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert saved.status_code == 303
+    assert saved.headers["location"] == f"/projects/{project['id']}"
+
+    assert client.post(
+        f"/storyboards/{project['storyboard_id']}/submit",
+        data={"csrf_token": csrf_token},
+        follow_redirects=False,
+    ).status_code == 303
+    pending_page = client.get(f"/projects/{project['id']}")
+    assert "退回修改" in pending_page.text
+    assert 'name="duration_seconds"' not in pending_page.text
+
+    withdrawn = client.post(
+        f"/storyboards/{project['storyboard_id']}/withdraw",
+        data={"csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert withdrawn.status_code == 303
+    assert 'name="duration_seconds"' in client.get(f"/projects/{project['id']}").text
+
+    client.post(
+        f"/storyboards/{project['storyboard_id']}/submit",
+        data={"csrf_token": csrf_token},
+    )
+    client.post("/logout")
+    login(client, "admin")
+    client.post(f"/api/storyboards/{project['storyboard_id']}/approve")
+    approved_page = client.get(f"/projects/{project['id']}")
+    assert 'name="model_slug"' in approved_page.text
+    assert f'name="csrf_token" value="{client.headers["X-CSRF-Token"]}"' in approved_page.text
+    assert '<option value="demo">Demo 本地适配器（演示）</option>' in approved_page.text
+    assert 'name="duration_seconds" value="20"' in approved_page.text
+    assert 'name="aspect_ratio" value="9:16"' in approved_page.text
+
+    with app.state.database.session() as session:
+        session.query(ModelProfile).filter_by(slug="demo").one().enabled = False
+    no_match_page = client.get(f"/projects/{project['id']}")
+    assert "暂无已验证模型" in no_match_page.text
+    assert 'name="model_slug"' not in no_match_page.text
