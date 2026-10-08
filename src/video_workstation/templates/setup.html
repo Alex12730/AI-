@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>初始化管理员 · AI 视频工作站</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-context" aria-labelledby="setup-heading">
+      <span class="brand-mark brand-mark-large" aria-hidden="true">AV</span>
+      <h1 id="setup-heading">先建立工作站的管理员账号。</h1>
+      <p>该入口只允许从本机访问，并且仅在系统没有管理员时开放。</p>
+      <ul class="plain-list">
+        <li><span>01</span>密码使用 Argon2 加密保存</li>
+        <li><span>02</span>系统不设置默认密码</li>
+        <li><span>03</span>创建成功后立即关闭初始化入口</li>
+      </ul>
+    </section>
+    <section class="login-panel" aria-label="创建管理员">
+      <div>
+        <h2>创建首个管理员</h2>
+        <p>请设置仅用于这台工作站的独立密码。</p>
+      </div>
+      {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+      <form method="post" action="/setup" class="form-stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>用户名<input name="username" value="{{ username }}" minlength="3" maxlength="80" autocomplete="username" required autofocus></label>
+        <label>密码<input type="password" name="password" minlength="12" maxlength="200" autocomplete="new-password" required></label>
+        <label>确认密码<input type="password" name="password_confirm" minlength="12" maxlength="200" autocomplete="new-password" required></label>
+        <button class="button button-primary" type="submit">创建并进入工作站</button>
+      </form>
+      <p class="microcopy">密码至少 12 个字符。请不要在聊天或代码中发送密码。</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 import hashlib
 import json
+from ipaddress import ip_address
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -27,6 +28,7 @@ from .services.projects import (
     assert_project_access,
     create_member,
     create_project,
+    bootstrap_admin,
     require_admin,
     submit_storyboard,
     validate_priority,
@@ -154,6 +156,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = session.get(User, user_id) if user_id else None
         return user if user and user.is_active else None
 
+    def require_loopback(request: Request) -> None:
+        host = request.client.host if request.client else ""
+        try:
+            is_loopback = ip_address(host.split("%", 1)[0]).is_loopback
+        except ValueError:
+            is_loopback = False
+        if not is_loopback:
+            raise HTTPException(403, "仅允许在工作站本机初始化")
+
+    def admin_exists(session: Session) -> bool:
+        return session.scalar(select(User.id).where(User.role == "admin")) is not None
+
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
@@ -181,10 +195,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "mode": "local-only"}
 
-    @app.get("/login", response_class=HTMLResponse)
-    def login_page(request: Request):
+    @app.get("/setup", response_class=HTMLResponse)
+    def setup_page(request: Request, session: Session = Depends(session_dependency)):
+        require_loopback(request)
+        if admin_exists(session):
+            return RedirectResponse("/login", status_code=303)
         request.session["csrf"] = secrets.token_urlsafe(24)
-        return templates.TemplateResponse(request, "login.html", {"error": None, "csrf_token": request.session["csrf"]})
+        return templates.TemplateResponse(
+            request,
+            "setup.html",
+            {"error": None, "csrf_token": request.session["csrf"], "username": "admin"},
+        )
+
+    @app.post("/setup", response_class=HTMLResponse)
+    def setup_admin(
+        request: Request,
+        username: str = Form(...),
+        password: str = Form(...),
+        password_confirm: str = Form(...),
+        csrf_token: str = Form(...),
+        session: Session = Depends(session_dependency),
+    ):
+        require_loopback(request)
+        if admin_exists(session):
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+
+        error = "两次输入的密码不一致" if password != password_confirm else None
+        admin = None
+        if error is None:
+            try:
+                admin = bootstrap_admin(session, username, password)
+            except ValueError as exc:
+                error = str(exc)
+        if error is not None:
+            return templates.TemplateResponse(
+                request,
+                "setup.html",
+                {"error": error, "csrf_token": csrf_token, "username": username.strip()},
+                status_code=400,
+            )
+
+        request.session.clear()
+        request.session["user_id"] = admin.id
+        request.session["csrf"] = secrets.token_urlsafe(24)
+        response = RedirectResponse("/", status_code=303)
+        response.headers["X-CSRF-Token"] = request.session["csrf"]
+        return response
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, session: Session = Depends(session_dependency)):
+        request.session["csrf"] = secrets.token_urlsafe(24)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": None, "csrf_token": request.session["csrf"], "needs_setup": not admin_exists(session)},
+        )
 
     @app.post("/login")
     def login(

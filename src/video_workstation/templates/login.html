@@ -30,7 +30,10 @@
         <label>密码<input type="password" name="password" autocomplete="current-password" required></label>
         <button class="button button-primary" type="submit">进入制作台</button>
       </form>
-      <p class="microcopy">系统不提供默认密码。首个管理员需通过本机 CLI 创建。</p>
+      {% if needs_setup %}
+      <a class="button button-secondary setup-link" href="/setup">首次设置管理员</a>
+      {% endif %}
+      <p class="microcopy">系统不提供默认密码。初始化入口仅在工作站本机开放。</p>
     </section>
   </main>
 </body>

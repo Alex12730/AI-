@@ -32,9 +32,10 @@ Set-Location D:\workspace\AI视频自动化工作流任务
 $env:VIDEO_WORKSTATION_DATA_DIR = "D:\ai-video-data"
 $env:VIDEO_WORKSTATION_SESSION_SECRET = "请替换为至少24位随机字符串"
 .\.venv\Scripts\video-workstation.exe init-db
-.\.venv\Scripts\video-workstation.exe create-admin admin
 .\scripts\run_web.ps1
 ```
+
+首次启动后，在工作站本机打开 `http://127.0.0.1:8000/setup` 创建管理员。该入口只允许回环地址访问，并会在首个管理员创建成功后自动关闭；不要设置或提交默认密码。
 
 另开一个终端：
 
@@ -59,9 +60,10 @@ pip install -e '.[dev]'
 export VIDEO_WORKSTATION_DATA_DIR=/srv/ai-video-workstation/data
 export VIDEO_WORKSTATION_SESSION_SECRET='至少24位随机字符串'
 video-workstation init-db
-video-workstation create-admin admin
 uvicorn video_workstation.main:application --factory --host 127.0.0.1 --port 8000
 ```
+
+服务启动后，在工作站本机打开 `http://127.0.0.1:8000/setup` 创建首个管理员。
 
 ## 模型接入
 

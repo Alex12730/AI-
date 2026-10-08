@@ -141,6 +141,7 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
 .login-panel p { margin: .35rem 0 0; color: var(--muted); }
 .form-stack { display: grid; gap: 1rem; }
 .microcopy { font-size: .76rem; }
+.setup-link { display: block; text-align: center; text-decoration: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (max-width: 940px) {
   .app-shell { grid-template-columns: 1fr; }
