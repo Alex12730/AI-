@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · AI 视频工作站{% endblock %}
+{% block content %}
+<nav class="breadcrumb" aria-label="面包屑"><a href="/">项目</a><span>/</span><span>{{ project.name }}</span></nav>
+<header class="page-header project-header">
+  <div><h1>{{ project.name }}</h1><p>分镜 v{{ storyboard.version }} · <span class="badge badge-{{ storyboard.status }}"><i></i>{{ storyboard.status }}</span></p></div>
+  <div class="header-actions">
+    {% if storyboard.status == 'draft' %}<form method="post" action="/storyboards/{{ storyboard.id }}/submit"><button class="button button-primary" type="submit">提交审批</button></form>{% endif %}
+    {% if storyboard.status == 'pending_approval' and user.role == 'admin' %}<form method="post" action="/storyboards/{{ storyboard.id }}/approve"><button class="button button-primary" type="submit">批准分镜</button></form>{% endif %}
+  </div>
+</header>
+<section class="workflow-strip" aria-label="生产阶段">
+  <span class="is-done">脚本</span><span class="is-done">分镜</span><span class="{% if storyboard.status == 'approved' %}is-done{% else %}is-current{% endif %}">审批</span><span>生成</span><span>合成质检</span><span>验收归档</span>
+</section>
+<section class="panel" aria-labelledby="script-title"><div class="panel-heading"><div><h2 id="script-title">原始脚本</h2><p>产品界面必须使用真实录屏或截图动效</p></div></div><p class="script-copy">{{ project.source_script }}</p></section>
+<section class="panel" aria-labelledby="shots-title">
+  <div class="panel-heading"><div><h2 id="shots-title">镜头清单</h2><p>{{ storyboard.shots|length }} 个镜头，按顺序生成与返工</p></div></div>
+  <div class="shot-list">{% for shot in storyboard.shots|sort(attribute='sequence_no') %}<article class="shot-row">
+    <div class="shot-index">{{ '%02d'|format(shot.sequence_no) }}</div>
+    <div class="shot-main"><div class="shot-title"><h3>{{ shot.title }}</h3><span class="badge badge-neutral">{{ shot.scene_type }}</span></div><p>{{ shot.prompt }}</p><small>{{ shot.duration_seconds|int }} 秒 · {{ shot.aspect_ratio }}</small></div>
+    <div class="shot-action">
+      {% if storyboard.status == 'approved' %}
+      <form class="inline-form demo-enqueue" data-shot="{{ shot.id }}">
+        <input type="hidden" name="model_slug" value="demo"><input type="hidden" name="duration_seconds" value="5"><input type="hidden" name="aspect_ratio" value="16:9"><input type="hidden" name="priority" value="1"><input type="hidden" name="estimated_temp_bytes" value="1"><input type="hidden" name="seed" value="{{ shot.sequence_no }}">
+        <button class="button button-secondary" type="submit">Demo 入队</button>
+      </form>
+      {% else %}<span class="muted">审批后可入队</span>{% endif %}
+    </div>
+  </article>{% endfor %}</div>
+</section>
+{% if tasks %}<section class="panel" aria-labelledby="project-tasks"><div class="panel-heading"><div><h2 id="project-tasks">项目任务</h2><p>生成记录不会覆盖原始镜头</p></div></div><div class="task-list">{% for task in tasks %}<div class="task-row"><span class="badge badge-{{ task.status }}"><i></i>{{ task.status }}</span><code>{{ task.id[:8] }}</code><span>P{{ task.priority }}</span><span>{{ task.error_message or task.task_type }}</span></div>{% endfor %}</div></section>{% endif %}
+{% endblock %}

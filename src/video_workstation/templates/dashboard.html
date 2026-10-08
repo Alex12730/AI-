@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}制作工作台 · AI 视频工作站{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><h1>制作工作台</h1><p>先看审批与异常，再安排新的 GPU 任务。</p></div>
+  <button class="button button-primary" type="button" data-toggle="new-project">新建项目</button>
+</header>
+
+<section class="status-rail" aria-label="当前任务状态">
+  <div><span>等待</span><strong>{{ counts.queued }}</strong><small>按优先级与等待时间排序</small></div>
+  <div><span>运行</span><strong>{{ counts.running }}</strong><small>重型 GPU 任务最多 1 个</small></div>
+  <div><span>已完成</span><strong>{{ counts.succeeded }}</strong><small>等待人工验收或归档</small></div>
+  <div><span>需处理</span><strong>{{ counts.terminal_failed }}</strong><small>不会静默降低生成参数</small></div>
+</section>
+
+<section id="new-project" class="panel is-collapsed" aria-labelledby="new-project-title">
+  <div class="panel-heading"><div><h2 id="new-project-title">建立新项目</h2><p>脚本会先拆成可编辑草案，不会立即占用 GPU。</p></div></div>
+  <form class="project-form" method="post" action="/projects">
+    <label>项目名称<input name="name" maxlength="160" required placeholder="例如：新品功能演示片"></label>
+    <label class="wide">原始脚本<textarea name="source_script" rows="5" required placeholder="每句内容会形成一个初始镜头。产品界面请明确写“真实录屏”。"></textarea></label>
+    <div class="wide form-actions"><button class="button button-primary" type="submit">生成分镜草案</button></div>
+  </form>
+</section>
+
+<section class="panel" aria-labelledby="project-title">
+  <div class="panel-heading"><div><h2 id="project-title">项目</h2><p>{{ projects|length }} 个可访问项目</p></div></div>
+  {% if projects %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>项目</th><th>阶段</th><th>更新时间</th><th><span class="visually-hidden">操作</span></th></tr></thead>
+    <tbody>{% for project in projects %}<tr>
+      <td><a class="primary-link" href="/projects/{{ project.id }}">{{ project.name }}</a><small class="cell-note">{{ project.source_script[:58] }}{% if project.source_script|length > 58 %}…{% endif %}</small></td>
+      <td><span class="badge badge-{{ project.status }}"><i></i>{{ project.status }}</span></td>
+      <td class="tabular">{{ project.updated_at.strftime('%m-%d %H:%M') }}</td>
+      <td class="align-right"><a class="text-link" href="/projects/{{ project.id }}">打开</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty-state"><h3>还没有项目</h3><p>从一段 30–60 秒脚本开始，先确认分镜，再进入生成。</p><button class="button button-secondary" type="button" data-toggle="new-project">建立第一个项目</button></div>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="recent-title">
+  <div class="panel-heading"><div><h2 id="recent-title">最近任务</h2><p>最新 20 条，异常优先人工处理</p></div><a class="text-link" href="/queue">查看完整队列</a></div>
+  {% if tasks %}<div class="task-list">{% for task in tasks %}<div class="task-row">
+    <span class="badge badge-{{ task.status }}"><i></i>{{ task.status }}</span><code>{{ task.id[:8] }}</code><span>P{{ task.priority }}</span><span class="task-message">{{ task.error_message or task.task_type }}</span>
+  </div>{% endfor %}</div>{% else %}<p class="muted-block">还没有任务。通过审批的镜头才能进入队列。</p>{% endif %}
+</section>
+{% endblock %}

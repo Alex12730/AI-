@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}任务队列 · AI 视频工作站{% endblock %}
+{% block content %}
+<header class="page-header"><div><h1>任务队列</h1><p>同级先进先出；每等待 60 分钟自动提升一级。</p></div><span class="status-line"><i class="status-dot status-ok"></i>单 GPU 串行</span></header>
+<section class="panel" aria-labelledby="queue-table"><div class="panel-heading"><div><h2 id="queue-table">最近 100 条任务</h2><p>基础设施错误自动重试一次，画质问题必须人工返工</p></div></div>
+{% if tasks %}<div class="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>优先级</th><th>尝试</th><th>Worker</th><th>错误</th></tr></thead><tbody>{% for task in tasks %}<tr><td><code>{{ task.id[:12] }}</code></td><td><span class="badge badge-{{ task.status }}"><i></i>{{ task.status }}</span></td><td>P{{ task.priority }}</td><td>{{ task.attempts }}/{{ task.max_attempts }}</td><td>{{ task.leased_by or '—' }}</td><td>{{ task.error_message or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>队列为空</h3><p>通过审批的镜头从项目页进入队列。</p></div>{% endif %}</section>
+{% endblock %}

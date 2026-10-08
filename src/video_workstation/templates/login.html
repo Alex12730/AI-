@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · AI 视频工作站</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-context" aria-labelledby="login-heading">
+      <span class="brand-mark brand-mark-large" aria-hidden="true">AV</span>
+      <h1 id="login-heading">把每个镜头，放进可控的流程里。</h1>
+      <p>本地模型、单 GPU 队列、逐镜头审批与完整追溯。素材停留在工作站内。</p>
+      <ul class="plain-list">
+        <li><span>01</span>先确认分镜，再消耗显卡时间</li>
+        <li><span>02</span>模型档位只按本机实测开放</li>
+        <li><span>03</span>成片可回溯到参数、素材和审批</li>
+      </ul>
+    </section>
+    <section class="login-panel" aria-label="账号登录">
+      <div>
+        <h2>登录工作站</h2>
+        <p>使用管理员创建的局域网账号。</p>
+      </div>
+      {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+      <form method="post" action="/login" class="form-stack">
+        <label>用户名<input name="username" autocomplete="username" required autofocus></label>
+        <label>密码<input type="password" name="password" autocomplete="current-password" required></label>
+        <button class="button button-primary" type="submit">进入制作台</button>
+      </form>
+      <p class="microcopy">系统不提供默认密码。首个管理员需通过本机 CLI 创建。</p>
+    </section>
+  </main>
+</body>
+</html>
