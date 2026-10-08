@@ -78,27 +78,27 @@ Expected: PASS。
 - Produces: `matching_profiles_for_shot(shot: Shot, profiles: Iterable[ModelProfile]) -> list[ModelProfile]`，按显示名称稳定排序，只返回同时通过场景约束和精确预设准入的 Profile。
 - Consumes: Task 1 保存并锁定的 `Shot.duration_seconds` 与 `Shot.aspect_ratio`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 增加测试，断言新建和既有 Demo Profile 都获得 5/10/15/20 × 16:9/9:16 八个带当前配置指纹的预设，且重复 seed 不恢复被管理员停用的状态。增加匹配测试覆盖禁用、未验证、错误组合及 product_ui；增加 API测试，断言篡改已审批镜头参数返回 409，正确参数进入任务快照。
 
-- [ ] **Step 2: 验证测试按预期失败**
+- [x] **Step 2: 验证测试按预期失败**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests\test_model_profiles.py tests\test_api.py -q`
 
 Expected: FAIL，因为 Demo 目前只有两个 5 秒预设，且入队 API未比对镜头保存值。
 
-- [ ] **Step 3: 实现 Demo 预设同步、Profile 匹配和入队一致性校验**
+- [x] **Step 3: 实现 Demo 预设同步、Profile 匹配和入队一致性校验**
 
 更新 `PROFILE_DEFINITIONS` 与 `seed_model_profiles`，只同步 Demo 的能力预设和指纹，不覆盖 `enabled`。实现 `matching_profiles_for_shot`，复用 `validate_model_for_shot` 和 `admit_generation`。在 `api_enqueue` 校验请求时长/比例与镜头值一致，并让项目页传入按镜头 ID组织的可用 Profile 映射。
 
-- [ ] **Step 4: 运行目标测试**
+- [x] **Step 4: 运行目标测试**
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests\test_model_profiles.py tests\test_api.py -q`
 
 Expected: PASS。
 
-- [ ] **Step 5: 更新 `.feedback` 并提交模型匹配**
+- [x] **Step 5: 更新 `.feedback` 并提交模型匹配**
 
 记录本任务的测试和摩擦点后提交：`feat: match models to approved shot presets`。
 

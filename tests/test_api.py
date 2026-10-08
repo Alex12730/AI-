@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from video_workstation.config import Settings
 from video_workstation.main import create_app
-from video_workstation.models import User
+from video_workstation.models import Task, User
 from video_workstation.security import PasswordService
 
 
@@ -151,3 +151,58 @@ def test_cross_origin_or_missing_csrf_is_rejected(tmp_path):
         json={"name": "x", "source_script": "y"},
         headers={"Origin": "http://evil.test"},
     ).status_code == 403
+
+
+def test_enqueue_uses_approved_shot_values_and_rejects_tampering(tmp_path):
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "20 秒竖屏片", "source_script": "环境空镜。"},
+    ).json()
+    shot_id = project["shots"][0]["id"]
+    assert client.patch(
+        f"/api/shots/{shot_id}",
+        json={
+            "title": "20 秒竖屏空镜",
+            "prompt": "城市夜景",
+            "duration_seconds": 20,
+            "aspect_ratio": "9:16",
+        },
+    ).status_code == 200
+    client.post(f"/api/storyboards/{project['storyboard_id']}/submit")
+    client.post("/logout")
+    login(client, "admin")
+    client.post(f"/api/storyboards/{project['storyboard_id']}/approve")
+
+    tampered = client.post(
+        f"/api/shots/{shot_id}/enqueue",
+        json={
+            "model_slug": "demo",
+            "duration_seconds": 5,
+            "aspect_ratio": "16:9",
+            "priority": 1,
+            "estimated_temp_bytes": 1,
+            "seed": 321,
+        },
+    )
+    assert tampered.status_code == 409
+    assert "已审批镜头" in tampered.json()["detail"]
+
+    enqueued = client.post(
+        f"/api/shots/{shot_id}/enqueue",
+        json={
+            "model_slug": "demo",
+            "duration_seconds": 20,
+            "aspect_ratio": "9:16",
+            "priority": 1,
+            "estimated_temp_bytes": 1,
+            "seed": 321,
+        },
+    )
+    assert enqueued.status_code == 201
+    with app.state.database.session() as session:
+        tasks = session.query(Task).filter_by(shot_id=shot_id).all()
+        assert len(tasks) == 1
+        assert tasks[0].payload_json["duration_seconds"] == 20
+        assert tasks[0].payload_json["aspect_ratio"] == "9:16"

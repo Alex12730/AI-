@@ -4,7 +4,8 @@ import pytest
 
 from video_workstation.config import Settings
 from video_workstation.db import Database
-from video_workstation.models import ModelProfile
+from video_workstation.models import ModelProfile, Shot
+from video_workstation.services import models as model_service
 from video_workstation.services.models import (
     ModelNotAdmitted,
     admit_generation,
@@ -100,3 +101,49 @@ def test_reconfiguration_invalidates_old_presets_and_string_booleans_are_rejecte
     assert h3.validated_presets_json == []
     with pytest.raises(ValueError, match="布尔"):
         record_benchmark(h3, 5, "16:9", [{"success": "false", "oom": False, "corrupt": False}] * 10)
+
+
+def test_demo_profile_syncs_all_eight_workflow_presets_without_reenabling(session):
+    seed_model_profiles(session)
+    demo = session.query(ModelProfile).filter_by(slug="demo").one()
+    demo.enabled = False
+
+    seed_model_profiles(session)
+
+    assert demo.enabled is False
+    assert {
+        (float(preset["duration_seconds"]), preset["aspect_ratio"])
+        for preset in demo.validated_presets_json
+    } == {
+        (duration, aspect_ratio)
+        for duration in (5, 10, 15, 20)
+        for aspect_ratio in ("16:9", "9:16")
+    }
+    assert all(
+        preset["config_fingerprint"] == model_service.model_config_fingerprint(demo)
+        for preset in demo.validated_presets_json
+    )
+
+
+def test_matching_profiles_require_scene_and_exact_admitted_preset(session):
+    seed_model_profiles(session)
+    demo = session.query(ModelProfile).filter_by(slug="demo").one()
+    h3 = session.query(ModelProfile).filter_by(slug="minimax-h3-fl2va").one()
+    record_benchmark(h3, 10, "9:16", passing_runs())
+    shot = Shot(
+        sequence_no=1,
+        title="人物镜头",
+        prompt="人物表演",
+        scene_type="character",
+        duration_seconds=10,
+        aspect_ratio="9:16",
+    )
+
+    matches = model_service.matching_profiles_for_shot(shot, [h3, demo])
+    assert [profile.slug for profile in matches] == ["demo", "minimax-h3-fl2va"]
+
+    shot.scene_type = "product_ui"
+    assert [profile.slug for profile in model_service.matching_profiles_for_shot(shot, [h3, demo])] == ["demo"]
+
+    demo.enabled = False
+    assert model_service.matching_profiles_for_shot(shot, [h3, demo]) == []

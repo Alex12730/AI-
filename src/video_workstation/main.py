@@ -21,7 +21,14 @@ from .models import Asset, AuditLog, ModelProfile, Project, Review, Shot, Storyb
 from .offline import validate_offline_profile
 from .queue import QueueService
 from .security import PasswordService
-from .services.models import ModelNotAdmitted, admit_generation, model_config_fingerprint, seed_model_profiles, validate_model_for_shot
+from .services.models import (
+    ModelNotAdmitted,
+    admit_generation,
+    matching_profiles_for_shot,
+    model_config_fingerprint,
+    seed_model_profiles,
+    validate_model_for_shot,
+)
 from .services.projects import (
     PermissionDenied,
     approve_storyboard,
@@ -328,6 +335,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assert_project_access(user, project)
         storyboard = max(project.storyboards, key=lambda item: item.version)
         profiles = list(session.scalars(select(ModelProfile).order_by(ModelProfile.display_name)))
+        available_profiles_by_shot = {
+            shot.id: matching_profiles_for_shot(shot, profiles)
+            for shot in storyboard.shots
+        }
         tasks = list(session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.created_at.desc())))
         return templates.TemplateResponse(
             request,
@@ -337,6 +348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "project": project,
                 "storyboard": storyboard,
                 "profiles": profiles,
+                "available_profiles_by_shot": available_profiles_by_shot,
                 "tasks": tasks,
                 "page": "projects",
                 "csrf_token": request.session["csrf"],
@@ -436,13 +448,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assert_project_access(user, project)
         if shot.storyboard.status != "approved" or shot.status != "approved":
             raise HTTPException(409, "分镜尚未审批")
+        if (
+            float(payload.duration_seconds) != float(shot.duration_seconds)
+            or payload.aspect_ratio != shot.aspect_ratio
+        ):
+            raise HTTPException(409, "入队参数必须与已审批镜头一致")
         priority = validate_priority(user, payload.priority)
         profile = session.scalar(select(ModelProfile).where(ModelProfile.slug == payload.model_slug))
         if profile is None:
             raise HTTPException(404, "模型 Profile 不存在")
         validate_model_for_shot(shot, profile)
-        preset = admit_generation(profile, duration_seconds=payload.duration_seconds, aspect_ratio=payload.aspect_ratio)
-        estimated_temp_bytes = 1 if profile.adapter_type == "demo" else max(20 * 1024**3, int(payload.duration_seconds * 4 * 1024**3))
+        preset = admit_generation(
+            profile,
+            duration_seconds=shot.duration_seconds,
+            aspect_ratio=shot.aspect_ratio,
+        )
+        estimated_temp_bytes = 1 if profile.adapter_type == "demo" else max(20 * 1024**3, int(shot.duration_seconds * 4 * 1024**3))
         StorageGuard(settings.asset_dir, minimum_free_bytes=settings.minimum_free_bytes).ensure_capacity(
             estimated_temp_bytes=estimated_temp_bytes
         )
@@ -469,8 +490,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "prompt": shot.prompt,
             "negative_prompt": shot.negative_prompt,
             "output_path": str(output_path),
-            "duration_seconds": payload.duration_seconds,
-            "aspect_ratio": payload.aspect_ratio,
+            "duration_seconds": shot.duration_seconds,
+            "aspect_ratio": shot.aspect_ratio,
             "seed": payload.seed,
             "minimum_free_bytes": settings.minimum_free_bytes,
             "validated_preset": preset,

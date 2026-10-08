@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 import hashlib
 import json
@@ -7,7 +8,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import ModelProfile
+from ..models import ModelProfile, Shot
 from ..offline import validate_offline_profile
 
 
@@ -24,8 +25,13 @@ PROFILE_DEFINITIONS = [
         "is_heavy": False,
         "capabilities_json": {"demo": True, "notice": "不生成视频"},
         "validated_presets_json": [
-            {"duration_seconds": 5, "aspect_ratio": "16:9", "success_rate": 1.0},
-            {"duration_seconds": 5, "aspect_ratio": "9:16", "success_rate": 1.0},
+            {
+                "duration_seconds": duration,
+                "aspect_ratio": aspect_ratio,
+                "success_rate": 1.0,
+            }
+            for duration in (5, 10, 15, 20)
+            for aspect_ratio in ("16:9", "9:16")
         ],
     },
     {
@@ -102,11 +108,11 @@ def seed_model_profiles(session: Session) -> list[ModelProfile]:
     for definition in PROFILE_DEFINITIONS:
         existing = session.scalar(select(ModelProfile).where(ModelProfile.slug == definition["slug"]))
         if existing is not None:
-            if existing.slug == "demo" and existing.validated_presets_json:
+            if existing.slug == "demo":
                 fingerprint = model_config_fingerprint(existing)
                 existing.validated_presets_json = [
                     {**preset, "config_fingerprint": fingerprint}
-                    for preset in existing.validated_presets_json
+                    for preset in definition["validated_presets_json"]
                 ]
             profiles.append(existing)
             continue
@@ -213,6 +219,22 @@ def admit_generation(profile: ModelProfile, *, duration_seconds: float, aspect_r
 def validate_model_for_shot(shot, profile: ModelProfile) -> None:
     if shot.scene_type == "product_ui" and profile.adapter_type != "demo":
         raise ModelNotAdmitted("产品界面镜头必须使用真实录屏或截图动效，不能使用生成模型")
+
+
+def matching_profiles_for_shot(shot: Shot, profiles: Iterable[ModelProfile]) -> list[ModelProfile]:
+    matches: list[ModelProfile] = []
+    for profile in sorted(profiles, key=lambda item: (item.display_name, item.slug)):
+        try:
+            validate_model_for_shot(shot, profile)
+            admit_generation(
+                profile,
+                duration_seconds=shot.duration_seconds,
+                aspect_ratio=shot.aspect_ratio,
+            )
+        except ModelNotAdmitted:
+            continue
+        matches.append(profile)
+    return matches
 
 
 def route_model_slug(scene_type: str, *, exact_dialogue: bool = False) -> str:
