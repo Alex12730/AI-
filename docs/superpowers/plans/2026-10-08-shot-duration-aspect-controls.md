@@ -152,7 +152,7 @@ Expected: PASS。
 - Consumes: Tasks 1–3 的完整功能。
 - Produces: 可在当前本地数据库与浏览器中使用的新版本服务。
 
-- [ ] **Step 1: 运行完整自动验证**
+- [x] **Step 1: 运行完整自动验证**
 
 Run: `.\.venv\Scripts\python.exe -m pytest -q`
 
@@ -166,7 +166,7 @@ Run: `git diff --check`
 
 Expected: 无错误。
 
-- [ ] **Step 2: 更新反馈并提交实现**
+- [x] **Step 2: 更新反馈并提交实现**
 
 在 `.feedback` 记录测试、工具摩擦和改进建议；审查暂存内容不含数据库、密码、Cookie、会话密钥或模型权重，再提交功能代码和计划。
 

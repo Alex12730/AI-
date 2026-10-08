@@ -147,3 +147,16 @@ def test_matching_profiles_require_scene_and_exact_admitted_preset(session):
 
     demo.enabled = False
     assert model_service.matching_profiles_for_shot(shot, [h3, demo]) == []
+
+
+def test_twenty_second_benchmark_is_ltx_only(session):
+    seed_model_profiles(session)
+    h3 = session.query(ModelProfile).filter_by(slug="minimax-h3-fl2va").one()
+    ltx = session.query(ModelProfile).filter_by(slug="ltx-2.3").one()
+
+    with pytest.raises(ValueError, match="最长只开放 15 秒"):
+        record_benchmark(h3, 20, "16:9", passing_runs())
+
+    ltx.enabled = True
+    assert record_benchmark(ltx, 20, "9:16", passing_runs()) is True
+    assert admit_generation(ltx, duration_seconds=20, aspect_ratio="9:16")["duration_seconds"] == 20

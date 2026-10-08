@@ -23,3 +23,7 @@ def test_cli_exposes_worker_and_model_operations():
     )
     assert benchmark.duration == 5
     assert benchmark.aspect_ratio == "16:9"
+    ltx_benchmark = parser.parse_args(
+        ["record-benchmark", "ltx-2.3", "20", "9:16", "runs.json"]
+    )
+    assert ltx_benchmark.duration == 20

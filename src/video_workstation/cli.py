@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--quantization", required=True)
     benchmark = subparsers.add_parser("record-benchmark", help="录入十次本机准入结果")
     benchmark.add_argument("slug")
-    benchmark.add_argument("duration", type=int, choices=[5, 10, 15])
+    benchmark.add_argument("duration", type=int, choices=[5, 10, 15, 20])
     benchmark.add_argument("aspect_ratio", choices=["16:9", "9:16"])
     benchmark.add_argument("runs_json", type=Path)
     subparsers.add_parser("list-models", help="列出模型和已验证档位")

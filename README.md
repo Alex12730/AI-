@@ -7,12 +7,13 @@
 ## 已实现
 
 - FastAPI + Jinja2 操作台、JSON API、Argon2 账号、成员/管理员权限。
-- 项目 → 分镜草案 → 提交 → 管理员审批 → 逐镜头入队。
+- 项目 → 分镜草案（逐镜头选择 5/10/15/20 秒与 16:9/9:16）→ 提交 → 管理员审批 → 逐镜头入队；待审批分镜可由项目创建者或管理员退回修改。
 - 草稿镜头编辑、成员创建与项目授权、任务取消/重试/优先级、模型启停、管理员验收归档 API。
 - SQLite WAL 持久化队列、同级 FIFO、等待老化、单重型任务、Worker 心跳/租约恢复。
 - 基础设施错误自动重试一次；画质/OOM 不静默降级。
 - Demo、Wan、MiniMax H3 FL2VA、LTX 本地命令适配边界，统一 `shell=False` 参数数组。
 - H3 5/10/15 秒、16:9/9:16 独立十次基准门槛；无验证记录时 API 和界面均不开放。
+- LTX-2.3 的 20 秒档仅在 A6000 完成十次基准并通过准入后开放；H3 不接受 20 秒基准记录。
 - 100GB 固定余量 + 两倍临时空间检查、系统生成资产路径、ffprobe 结构/音轨/时长检查；验收后生成带 SHA-256 的追溯清单。
 - MiniMax H3 许可证/NOTICE 元数据、纯本地 Profile 策略与阻断外部端点测试。
 - 桌面与移动端操作台；移动端表格在容器内滚动，不造成整页横向溢出。
@@ -91,6 +92,12 @@ uvicorn video_workstation.main:application --factory --host 127.0.0.1 --port 800
 ```
 
 只有“10 次、成功率至少 90%、无 OOM、无损坏文件”的组合会出现为已验证档。样例结构见 [benchmark-runs.example.json](config/examples/benchmark-runs.example.json)。安装与许可检查见 [MiniMax H3 本地接入](docs/operations/minimax-h3-local.md)。
+
+LTX-2.3 安装完成后可用相同流程验收 20 秒候选档：
+
+```powershell
+.\.venv\Scripts\video-workstation.exe record-benchmark ltx-2.3 20 9:16 benchmark-runs.json
+```
 
 ## 目录与数据
 

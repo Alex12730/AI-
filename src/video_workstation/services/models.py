@@ -154,6 +154,10 @@ def record_benchmark(
     aspect_ratio: str,
     runs: list[dict[str, Any]],
 ) -> bool:
+    if duration_seconds not in (5, 10, 15, 20):
+        raise ValueError("基准时长只能选择 5、10、15、20 秒")
+    if profile.adapter_type == "minimax_h3" and duration_seconds > 15:
+        raise ValueError("MiniMax H3 最长只开放 15 秒，20 秒档请使用 LTX-2.3 实测")
     history = list(profile.capabilities_json.get("benchmark_history", []))
     for run in runs:
         for key in ("success", "oom", "corrupt"):
