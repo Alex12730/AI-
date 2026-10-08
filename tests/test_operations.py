@@ -43,10 +43,27 @@ def test_draft_shot_edit_member_creation_and_project_assignment(tmp_path):
     shot_id = project["shots"][0]["id"]
     edited = client.patch(
         f"/api/shots/{shot_id}",
-        json={"title": "片头空镜", "prompt": "清晨城市航拍", "duration_seconds": 6, "aspect_ratio": "9:16"},
+        json={"title": "片头空镜", "prompt": "清晨城市航拍", "duration_seconds": 10, "aspect_ratio": "9:16"},
     )
     assert edited.status_code == 200
     assert edited.json()["prompt"] == "清晨城市航拍"
+    assert edited.json()["duration_seconds"] == 10
+
+    invalid = client.patch(
+        f"/api/shots/{shot_id}",
+        json={"title": "错误档位", "prompt": "不应保存", "duration_seconds": 6, "aspect_ratio": "9:16"},
+    )
+    assert invalid.status_code == 409
+    unchanged = client.get(f"/api/projects/{project['id']}").json()["shots"][0]
+    assert unchanged["title"] == "片头空镜"
+    assert unchanged["duration_seconds"] == 10
+
+    assert client.post(f"/api/storyboards/{project['storyboard_id']}/submit").status_code == 200
+    locked = client.patch(
+        f"/api/shots/{shot_id}",
+        json={"title": "审批后修改", "prompt": "不应保存", "duration_seconds": 15, "aspect_ratio": "16:9"},
+    )
+    assert locked.status_code == 409
 
     client.post("/logout")
     login(client, "admin")

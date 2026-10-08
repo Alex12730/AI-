@@ -31,6 +31,7 @@ from .services.projects import (
     bootstrap_admin,
     require_admin,
     submit_storyboard,
+    update_draft_shot,
     validate_priority,
 )
 from .storage import InsufficientStorage, StorageGuard, generated_asset_path
@@ -495,21 +496,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shot = session.get(Shot, shot_id)
         if shot is None:
             raise HTTPException(404, "镜头不存在")
-        assert_project_access(user, shot.storyboard.project)
-        if shot.storyboard.status != "draft":
-            raise HTTPException(409, "只有草稿分镜可以编辑")
-        shot.title = payload.title.strip()
-        shot.prompt = payload.prompt.strip()
-        shot.duration_seconds = payload.duration_seconds
-        shot.aspect_ratio = payload.aspect_ratio
-        session.add(
-            AuditLog(
-                actor_id=user.id,
-                action="shot.update",
-                entity_type="shot",
-                entity_id=shot.id,
+        try:
+            update_draft_shot(
+                session,
+                user,
+                shot,
+                title=payload.title,
+                prompt=payload.prompt,
+                duration_seconds=payload.duration_seconds,
+                aspect_ratio=payload.aspect_ratio,
             )
-        )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         return {
             "id": shot.id,
             "title": shot.title,

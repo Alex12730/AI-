@@ -15,6 +15,7 @@ from video_workstation.services.projects import (
     submit_storyboard,
     validate_priority,
 )
+from video_workstation.services import projects as project_service
 
 
 @pytest.fixture()
@@ -80,6 +81,86 @@ def test_storyboard_requires_admin_approval_and_writes_audit(database):
         assert project.status == "approved"
         assert storyboard.approved_by_id == admin.id
         assert session.query(AuditLog).filter_by(action="storyboard.approve").count() == 1
+
+
+def test_draft_shot_presets_are_validated_and_audited(database):
+    with database.session() as session:
+        member = User(username="member", password_hash="hash", role="member")
+        session.add(member)
+        session.flush()
+        project = create_project(session, member, "竖屏宣传片", "产品环境空镜。")
+        shot = project.storyboards[0].shots[0]
+
+        for duration, aspect_ratio in ((5, "16:9"), (10, "9:16"), (15, "16:9"), (20, "9:16")):
+            project_service.update_draft_shot(
+                session,
+                member,
+                shot,
+                title=shot.title,
+                prompt=shot.prompt,
+                duration_seconds=duration,
+                aspect_ratio=aspect_ratio,
+            )
+            assert shot.duration_seconds == duration
+            assert shot.aspect_ratio == aspect_ratio
+
+        with pytest.raises(ValueError, match="5、10、15、20"):
+            project_service.update_draft_shot(
+                session,
+                member,
+                shot,
+                title=shot.title,
+                prompt=shot.prompt,
+                duration_seconds=6,
+                aspect_ratio="9:16",
+            )
+        with pytest.raises(ValueError, match="16:9、9:16"):
+            project_service.update_draft_shot(
+                session,
+                member,
+                shot,
+                title=shot.title,
+                prompt=shot.prompt,
+                duration_seconds=20,
+                aspect_ratio="1:1",
+            )
+
+        assert shot.duration_seconds == 20
+        assert shot.aspect_ratio == "9:16"
+        assert session.query(AuditLog).filter_by(action="shot.update", entity_id=shot.id).count() == 4
+
+
+def test_pending_storyboard_withdrawal_obeys_owner_admin_and_state_rules(database):
+    with database.session() as session:
+        owner = User(username="owner", password_hash="hash", role="member")
+        collaborator = User(username="collaborator", password_hash="hash", role="member")
+        admin = User(username="admin", password_hash="hash", role="admin")
+        session.add_all([owner, collaborator, admin])
+        session.flush()
+        project = create_project(session, owner, "审批撤回", "环境空镜。")
+        project.members.append(collaborator)
+        storyboard = project.storyboards[0]
+
+        submit_storyboard(session, owner, storyboard)
+        with pytest.raises(PermissionDenied, match="创建者或管理员"):
+            project_service.withdraw_storyboard(session, collaborator, storyboard)
+
+        project_service.withdraw_storyboard(session, owner, storyboard)
+        assert storyboard.status == "draft"
+        assert project.status == "draft"
+        assert storyboard.submitted_at is None
+        assert all(shot.status == "draft" for shot in storyboard.shots)
+
+        submit_storyboard(session, owner, storyboard)
+        project_service.withdraw_storyboard(session, admin, storyboard)
+        assert storyboard.status == "draft"
+
+        submit_storyboard(session, owner, storyboard)
+        approve_storyboard(session, admin, storyboard)
+        with pytest.raises(ValueError, match="只有待审批"):
+            project_service.withdraw_storyboard(session, admin, storyboard)
+
+        assert session.query(AuditLog).filter_by(action="storyboard.withdraw", entity_id=storyboard.id).count() == 2
 
 
 def test_p0_priority_is_admin_only():

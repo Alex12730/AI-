@@ -14,6 +14,10 @@ class PermissionDenied(RuntimeError):
     pass
 
 
+SHOT_DURATION_PRESETS = (5, 10, 15, 20)
+SHOT_ASPECT_RATIOS = ("16:9", "9:16")
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -130,6 +134,40 @@ def create_project(session: Session, actor: User, name: str, source_script: str)
     return project
 
 
+def update_draft_shot(
+    session: Session,
+    actor: User,
+    shot: Shot,
+    *,
+    title: str,
+    prompt: str,
+    duration_seconds: float,
+    aspect_ratio: str,
+) -> Shot:
+    assert_project_access(actor, shot.storyboard.project)
+    if shot.storyboard.status != "draft":
+        raise ValueError("只有草稿分镜可以编辑")
+    if duration_seconds not in SHOT_DURATION_PRESETS:
+        raise ValueError("时长只能选择 5、10、15、20 秒")
+    if aspect_ratio not in SHOT_ASPECT_RATIOS:
+        raise ValueError("画幅只能选择 16:9、9:16")
+
+    shot.title = title.strip()
+    shot.prompt = prompt.strip()
+    shot.duration_seconds = duration_seconds
+    shot.aspect_ratio = aspect_ratio
+    session.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="shot.update",
+            entity_type="shot",
+            entity_id=shot.id,
+            details_json={"duration_seconds": duration_seconds, "aspect_ratio": aspect_ratio},
+        )
+    )
+    return shot
+
+
 def submit_storyboard(session: Session, actor: User, storyboard: Storyboard) -> Storyboard:
     assert_project_access(actor, storyboard.project)
     if storyboard.status != "draft":
@@ -143,6 +181,31 @@ def submit_storyboard(session: Session, actor: User, storyboard: Storyboard) -> 
         AuditLog(
             actor_id=actor.id,
             action="storyboard.submit",
+            entity_type="storyboard",
+            entity_id=storyboard.id,
+        )
+    )
+    return storyboard
+
+
+def withdraw_storyboard(session: Session, actor: User, storyboard: Storyboard) -> Storyboard:
+    assert_project_access(actor, storyboard.project)
+    if actor.role != "admin" and actor.id != storyboard.project.created_by_id:
+        raise PermissionDenied("只有项目创建者或管理员可以退回修改")
+    if storyboard.status != "pending_approval":
+        raise ValueError("只有待审批分镜可以退回修改")
+
+    storyboard.status = "draft"
+    storyboard.project.status = "draft"
+    storyboard.submitted_at = None
+    storyboard.approved_by_id = None
+    storyboard.approved_at = None
+    for shot in storyboard.shots:
+        shot.status = "draft"
+    session.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="storyboard.withdraw",
             entity_type="storyboard",
             entity_id=storyboard.id,
         )
