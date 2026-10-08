@@ -163,6 +163,123 @@ def test_pending_storyboard_withdrawal_obeys_owner_admin_and_state_rules(databas
         assert session.query(AuditLog).filter_by(action="storyboard.withdraw", entity_id=storyboard.id).count() == 2
 
 
+def test_bulk_update_draft_shots_updates_all_and_writes_one_audit(database):
+    with database.session() as session:
+        member = User(username="member", password_hash="hash", role="member")
+        session.add(member)
+        session.flush()
+        project = create_project(session, member, "统一镜头", "环境空镜。人物表演。产品界面。")
+        storyboard = project.storyboards[0]
+
+        updated_count = project_service.bulk_update_draft_shots(
+            session,
+            member,
+            storyboard,
+            duration_seconds=15,
+            aspect_ratio="9:16",
+        )
+
+        assert updated_count == 3
+        assert [(shot.duration_seconds, shot.aspect_ratio) for shot in storyboard.shots] == [
+            (15, "9:16"),
+            (15, "9:16"),
+            (15, "9:16"),
+        ]
+        audit = session.query(AuditLog).filter_by(
+            action="storyboard.shots.bulk_update",
+            entity_id=storyboard.id,
+        ).one()
+        assert audit.entity_type == "storyboard"
+        assert audit.details_json == {
+            "duration_seconds": 15,
+            "aspect_ratio": "9:16",
+            "shot_count": 3,
+        }
+
+
+def test_bulk_update_draft_shots_rejects_invalid_or_locked_without_partial_changes(database):
+    with database.session() as session:
+        member = User(username="member", password_hash="hash", role="member")
+        session.add(member)
+        session.flush()
+        project = create_project(session, member, "拒绝错误批量设置", "环境空镜。人物表演。")
+        storyboard = project.storyboards[0]
+        original = [(shot.duration_seconds, shot.aspect_ratio) for shot in storyboard.shots]
+
+        with pytest.raises(ValueError, match="5、10、15、20"):
+            project_service.bulk_update_draft_shots(
+                session,
+                member,
+                storyboard,
+                duration_seconds=6,
+                aspect_ratio="9:16",
+            )
+        assert [(shot.duration_seconds, shot.aspect_ratio) for shot in storyboard.shots] == original
+
+        with pytest.raises(ValueError, match="16:9、9:16"):
+            project_service.bulk_update_draft_shots(
+                session,
+                member,
+                storyboard,
+                duration_seconds=15,
+                aspect_ratio="1:1",
+            )
+        assert [(shot.duration_seconds, shot.aspect_ratio) for shot in storyboard.shots] == original
+
+        submit_storyboard(session, member, storyboard)
+        with pytest.raises(ValueError, match="只有草稿分镜可以编辑"):
+            project_service.bulk_update_draft_shots(
+                session,
+                member,
+                storyboard,
+                duration_seconds=15,
+                aspect_ratio="9:16",
+            )
+        assert [(shot.duration_seconds, shot.aspect_ratio) for shot in storyboard.shots] == original
+        assert session.query(AuditLog).filter_by(action="storyboard.shots.bulk_update").count() == 0
+
+
+def test_bulk_update_draft_shots_enforces_access_and_accepts_empty_storyboard(database):
+    with database.session() as session:
+        owner = User(username="owner", password_hash="hash", role="member")
+        outsider = User(username="outsider", password_hash="hash", role="member")
+        session.add_all([owner, outsider])
+        session.flush()
+        project = create_project(session, owner, "空分镜批量设置", "环境空镜。")
+        storyboard = project.storyboards[0]
+
+        with pytest.raises(PermissionDenied, match="无权访问"):
+            project_service.bulk_update_draft_shots(
+                session,
+                outsider,
+                storyboard,
+                duration_seconds=10,
+                aspect_ratio="9:16",
+            )
+        assert session.query(AuditLog).filter_by(action="storyboard.shots.bulk_update").count() == 0
+
+        storyboard.shots.clear()
+        updated_count = project_service.bulk_update_draft_shots(
+            session,
+            owner,
+            storyboard,
+            duration_seconds=10,
+            aspect_ratio="9:16",
+        )
+
+        assert updated_count == 0
+        assert storyboard.shots == []
+        audit = session.query(AuditLog).filter_by(
+            action="storyboard.shots.bulk_update",
+            entity_id=storyboard.id,
+        ).one()
+        assert audit.details_json == {
+            "duration_seconds": 10,
+            "aspect_ratio": "9:16",
+            "shot_count": 0,
+        }
+
+
 def test_p0_priority_is_admin_only():
     member = User(username="member", password_hash="hash", role="member")
     admin = User(username="admin", password_hash="hash", role="admin")

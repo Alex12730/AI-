@@ -168,6 +168,43 @@ def update_draft_shot(
     return shot
 
 
+def bulk_update_draft_shots(
+    session: Session,
+    actor: User,
+    storyboard: Storyboard,
+    *,
+    duration_seconds: float,
+    aspect_ratio: str,
+) -> int:
+    assert_project_access(actor, storyboard.project)
+    if storyboard.status != "draft":
+        raise ValueError("只有草稿分镜可以编辑")
+    if duration_seconds not in SHOT_DURATION_PRESETS:
+        raise ValueError("时长只能选择 5、10、15、20 秒")
+    if aspect_ratio not in SHOT_ASPECT_RATIOS:
+        raise ValueError("画幅只能选择 16:9、9:16")
+
+    for shot in storyboard.shots:
+        shot.duration_seconds = duration_seconds
+        shot.aspect_ratio = aspect_ratio
+
+    shot_count = len(storyboard.shots)
+    session.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="storyboard.shots.bulk_update",
+            entity_type="storyboard",
+            entity_id=storyboard.id,
+            details_json={
+                "duration_seconds": duration_seconds,
+                "aspect_ratio": aspect_ratio,
+                "shot_count": shot_count,
+            },
+        )
+    )
+    return shot_count
+
+
 def submit_storyboard(session: Session, actor: User, storyboard: Storyboard) -> Storyboard:
     assert_project_access(actor, storyboard.project)
     if storyboard.status != "draft":
