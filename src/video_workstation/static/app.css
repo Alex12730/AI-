@@ -123,6 +123,13 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
 .shot-main p { margin: .4rem 0; max-width: 72ch; }
 .shot-main small, .muted { color: var(--muted); }
 .shot-action { align-self: center; }
+.bulk-shot-settings { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(110px, 140px) minmax(110px, 140px) auto; gap: .75rem; align-items: end; padding: 1rem 1.25rem; border-top: 1px solid #e5e1d9; background: #f7f5f0; }
+.bulk-shot-copy { display: grid; gap: .2rem; align-self: center; }
+.bulk-shot-copy strong { font-size: .92rem; }
+.bulk-shot-copy span { color: var(--muted); font-size: .8rem; }
+.bulk-shot-settings select, .bulk-shot-settings .button { min-height: 44px; }
+.bulk-shot-settings select { padding: .55rem .65rem; }
+.bulk-shot-settings .button { padding-block: .55rem; white-space: nowrap; }
 .shot-settings-form { display: grid; grid-template-columns: minmax(110px, 140px) minmax(110px, 140px) auto; gap: .65rem; align-items: end; margin-top: .75rem; }
 .shot-settings-form select, .shot-action select { min-height: 44px; padding: .55rem .65rem; }
 .shot-settings-form .button { min-height: 44px; padding-block: .55rem; }
@@ -180,6 +187,8 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
   .shot-row { grid-template-columns: 38px minmax(0, 1fr); }
   .shot-action { grid-column: 2; }
   .shot-action .button { width: 100%; }
+  .bulk-shot-settings { grid-template-columns: 1fr; }
+  .bulk-shot-settings .button { width: 100%; }
   .shot-settings-form { grid-template-columns: 1fr; }
   .login-body { padding: 0; }
   .login-shell { min-height: 100vh; grid-template-columns: 1fr; border-radius: 0; }

@@ -16,6 +16,19 @@
 <section class="panel" aria-labelledby="script-title"><div class="panel-heading"><div><h2 id="script-title">原始脚本</h2><p>产品界面必须使用真实录屏或截图动效</p></div></div><p class="script-copy">{{ project.source_script }}</p></section>
 <section class="panel" aria-labelledby="shots-title">
   <div class="panel-heading"><div><h2 id="shots-title">镜头清单</h2><p>{{ storyboard.shots|length }} 个镜头，按顺序生成与返工</p></div></div>
+  {% if storyboard.status == 'draft' %}
+  <form class="bulk-shot-settings" method="post" action="/storyboards/{{ storyboard.id }}/shot-settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="bulk-shot-copy"><strong>统一设置全部镜头</strong><span>应用后仍可单独修改某个镜头。</span></div>
+    <label>统一时长
+      <select name="duration_seconds">{% for duration in duration_presets %}<option value="{{ duration }}">{{ duration }} 秒</option>{% endfor %}</select>
+    </label>
+    <label>统一画幅
+      <select name="aspect_ratio">{% for ratio in aspect_ratios %}<option value="{{ ratio }}">{{ ratio }}</option>{% endfor %}</select>
+    </label>
+    <button class="button button-secondary" type="submit">应用到全部镜头</button>
+  </form>
+  {% endif %}
   <div class="shot-list">{% for shot in storyboard.shots|sort(attribute='sequence_no') %}<article class="shot-row">
     <div class="shot-index">{{ '%02d'|format(shot.sequence_no) }}</div>
     <div class="shot-main"><div class="shot-title"><h3>{{ shot.title }}</h3><span class="badge badge-neutral">{{ shot.scene_type }}</span></div><p>{{ shot.prompt }}</p>

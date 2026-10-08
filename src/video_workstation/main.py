@@ -35,6 +35,7 @@ from .services.projects import (
     SHOT_DURATION_PRESETS,
     approve_storyboard,
     assert_project_access,
+    bulk_update_draft_shots,
     create_member,
     create_project,
     bootstrap_admin,
@@ -389,6 +390,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
+
+    @app.post("/storyboards/{storyboard_id}/shot-settings")
+    def update_storyboard_shot_settings_form(
+        storyboard_id: str,
+        request: Request,
+        duration_seconds: float = Form(...),
+        aspect_ratio: str = Form(...),
+        csrf_token: str = Form(...),
+        session: Session = Depends(session_dependency),
+    ):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+        storyboard = session.get(Storyboard, storyboard_id)
+        if storyboard is None:
+            raise HTTPException(404, "分镜不存在")
+        try:
+            bulk_update_draft_shots(
+                session,
+                user,
+                storyboard,
+                duration_seconds=duration_seconds,
+                aspect_ratio=aspect_ratio,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/submit")
     def submit_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):

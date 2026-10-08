@@ -186,3 +186,117 @@ def test_project_page_edits_withdraws_and_matches_saved_shot_presets(tmp_path):
     no_match_page = client.get(f"/projects/{project['id']}")
     assert "暂无已验证模型" in no_match_page.text
     assert 'name="model_slug"' not in no_match_page.text
+
+
+def test_draft_page_bulk_updates_all_shots_then_allows_single_override(tmp_path):
+    client, _app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "批量镜头设置", "source_script": "环境空镜。人物表演。产品界面。"},
+    ).json()
+    storyboard_id = project["storyboard_id"]
+    csrf_token = client.headers["X-CSRF-Token"]
+
+    draft_page = client.get(f"/projects/{project['id']}")
+    assert draft_page.status_code == 200
+    assert "统一设置全部镜头" in draft_page.text
+    assert f'action="/storyboards/{storyboard_id}/shot-settings"' in draft_page.text
+    assert "应用后仍可单独修改某个镜头。" in draft_page.text
+
+    bulk_saved = client.post(
+        f"/storyboards/{storyboard_id}/shot-settings",
+        data={"duration_seconds": "15", "aspect_ratio": "9:16", "csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert bulk_saved.status_code == 303
+    assert bulk_saved.headers["location"] == f"/projects/{project['id']}"
+    bulk_project = client.get(f"/api/projects/{project['id']}").json()
+    assert [(shot["duration_seconds"], shot["aspect_ratio"]) for shot in bulk_project["shots"]] == [
+        (15, "9:16"),
+        (15, "9:16"),
+        (15, "9:16"),
+    ]
+
+    first_shot_id = bulk_project["shots"][0]["id"]
+    single_saved = client.post(
+        f"/shots/{first_shot_id}/settings",
+        data={"duration_seconds": "5", "aspect_ratio": "16:9", "csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert single_saved.status_code == 303
+    overridden = client.get(f"/api/projects/{project['id']}").json()
+    assert [(shot["duration_seconds"], shot["aspect_ratio"]) for shot in overridden["shots"]] == [
+        (5, "16:9"),
+        (15, "9:16"),
+        (15, "9:16"),
+    ]
+
+
+def test_bulk_shot_settings_route_rejects_csrf_invalid_values_and_outsider(tmp_path):
+    client, _app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "批量设置权限", "source_script": "环境空镜。人物表演。"},
+    ).json()
+    route = f"/storyboards/{project['storyboard_id']}/shot-settings"
+    member_csrf = client.headers["X-CSRF-Token"]
+
+    invalid_csrf = client.post(
+        route,
+        data={"duration_seconds": "15", "aspect_ratio": "9:16", "csrf_token": "wrong-token"},
+        headers={"X-CSRF-Token": ""},
+    )
+    assert invalid_csrf.status_code == 403
+
+    invalid_values = client.post(
+        route,
+        data={"duration_seconds": "6", "aspect_ratio": "9:16", "csrf_token": member_csrf},
+    )
+    assert invalid_values.status_code == 409
+    unchanged = client.get(f"/api/projects/{project['id']}").json()
+    assert [(shot["duration_seconds"], shot["aspect_ratio"]) for shot in unchanged["shots"]] == [
+        (5, "16:9"),
+        (5, "16:9"),
+    ]
+
+    client.post("/logout")
+    login(client, "outsider")
+    outsider_csrf = client.headers["X-CSRF-Token"]
+    forbidden = client.post(
+        route,
+        data={"duration_seconds": "15", "aspect_ratio": "9:16", "csrf_token": outsider_csrf},
+    )
+    assert forbidden.status_code == 403
+
+    client.post("/logout")
+    login(client, "member")
+    still_unchanged = client.get(f"/api/projects/{project['id']}").json()
+    assert [(shot["duration_seconds"], shot["aspect_ratio"]) for shot in still_unchanged["shots"]] == [
+        (5, "16:9"),
+        (5, "16:9"),
+    ]
+
+
+def test_bulk_shot_settings_form_is_hidden_after_submission(tmp_path):
+    client, _app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "审批锁定批量设置", "source_script": "环境空镜。人物表演。"},
+    ).json()
+    csrf_token = client.headers["X-CSRF-Token"]
+    bulk_action = f'/storyboards/{project["storyboard_id"]}/shot-settings'
+
+    assert bulk_action in client.get(f"/projects/{project['id']}").text
+    submitted = client.post(
+        f"/storyboards/{project['storyboard_id']}/submit",
+        data={"csrf_token": csrf_token},
+        follow_redirects=False,
+    )
+    assert submitted.status_code == 303
+
+    pending_page = client.get(f"/projects/{project['id']}")
+    assert bulk_action not in pending_page.text
+    assert "5 秒 · 16:9" in pending_page.text
