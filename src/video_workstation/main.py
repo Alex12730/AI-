@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import secrets
+import hashlib
+import json
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -14,13 +16,16 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import Settings
 from .db import Database
-from .models import AuditLog, ModelProfile, Project, Shot, Storyboard, Task, User
+from .models import Asset, AuditLog, ModelProfile, Project, Review, Shot, Storyboard, Task, User
+from .offline import validate_offline_profile
+from .queue import QueueService
 from .security import PasswordService
-from .services.models import ModelNotAdmitted, admit_generation, seed_model_profiles
+from .services.models import ModelNotAdmitted, admit_generation, model_config_fingerprint, seed_model_profiles, validate_model_for_shot
 from .services.projects import (
     PermissionDenied,
     approve_storyboard,
     assert_project_access,
+    create_member,
     create_project,
     require_admin,
     submit_storyboard,
@@ -45,6 +50,34 @@ class EnqueueRequest(BaseModel):
     priority: int = Field(ge=0, le=2)
     estimated_temp_bytes: int = Field(gt=0)
     seed: int = Field(ge=0, le=2**32 - 1)
+
+
+class ShotUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    prompt: str = Field(min_length=1, max_length=20_000)
+    duration_seconds: float = Field(gt=0, le=60)
+    aspect_ratio: str = Field(pattern=r"^(16:9|9:16)$")
+
+
+class MemberCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+    password: str = Field(min_length=12, max_length=200)
+
+
+class ProjectMemberAdd(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+
+
+class TaskPriorityUpdate(BaseModel):
+    priority: int = Field(ge=0, le=2)
+
+
+class ModelToggle(BaseModel):
+    enabled: bool
+
+
+class AcceptanceRequest(BaseModel):
+    notes: str = Field(default="", max_length=10_000)
 
 
 def serialize_project(project: Project) -> dict:
@@ -77,7 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if len(settings.session_secret) < 24:
         raise RuntimeError("VIDEO_WORKSTATION_SESSION_SECRET 至少需要 24 个字符")
     database = Database(settings)
-    database.create_schema()
+    database.migrate()
     with database.session() as session:
         seed_model_profiles(session)
 
@@ -103,7 +136,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = session.get(User, user_id) if user_id else None
         if user is None or not user.is_active:
             raise HTTPException(status_code=401, detail="请先登录")
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            validate_csrf(request)
         return user
+
+    def validate_csrf(request: Request, submitted: str | None = None) -> None:
+        expected = request.session.get("csrf")
+        supplied = submitted or request.headers.get("X-CSRF-Token")
+        origin = request.headers.get("Origin")
+        if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+            raise HTTPException(403, "跨源请求被拒绝")
+        if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+            raise HTTPException(403, "CSRF 校验失败")
 
     def html_user(request: Request, session: Session) -> User | None:
         user_id = request.session.get("user_id")
@@ -139,30 +183,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
-        return templates.TemplateResponse(request, "login.html", {"error": None})
+        request.session["csrf"] = secrets.token_urlsafe(24)
+        return templates.TemplateResponse(request, "login.html", {"error": None, "csrf_token": request.session["csrf"]})
 
     @app.post("/login")
     def login(
         request: Request,
         username: str = Form(...),
         password: str = Form(...),
+        csrf_token: str = Form(...),
         session: Session = Depends(session_dependency),
     ):
+        validate_csrf(request, csrf_token)
         user = session.scalar(select(User).where(User.username == username.strip()))
         if user is None or not user.is_active or not PasswordService().verify(user.password_hash, password):
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {"error": "用户名或密码错误"},
+                {"error": "用户名或密码错误", "csrf_token": csrf_token},
                 status_code=401,
             )
         request.session.clear()
         request.session["user_id"] = user.id
         request.session["csrf"] = secrets.token_urlsafe(24)
-        return RedirectResponse("/", status_code=303)
+        response = RedirectResponse("/", status_code=303)
+        response.headers["X-CSRF-Token"] = request.session["csrf"]
+        return response
 
     @app.post("/logout")
-    def logout(request: Request):
+    def logout(request: Request, csrf_token: str | None = Form(None)):
+        validate_csrf(request, csrf_token)
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
 
@@ -182,7 +232,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "dashboard.html",
-            {"user": user, "projects": projects, "tasks": tasks, "counts": counts, "page": "dashboard"},
+            {"user": user, "projects": projects, "tasks": tasks, "counts": counts, "page": "dashboard", "csrf_token": request.session["csrf"]},
         )
 
     @app.post("/projects")
@@ -190,11 +240,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         name: str = Form(...),
         source_script: str = Form(...),
+        csrf_token: str = Form(...),
         session: Session = Depends(session_dependency),
     ):
         user = html_user(request, session)
         if user is None:
             return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
         project = create_project(session, user, name, source_script)
         return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
@@ -220,14 +272,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "profiles": profiles,
                 "tasks": tasks,
                 "page": "projects",
+                "csrf_token": request.session["csrf"],
             },
         )
 
     @app.post("/storyboards/{storyboard_id}/submit")
-    def submit_form(storyboard_id: str, request: Request, session: Session = Depends(session_dependency)):
+    def submit_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
         user = html_user(request, session)
         if user is None:
             return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
         storyboard = session.get(Storyboard, storyboard_id)
         if storyboard is None:
             raise HTTPException(404, "分镜不存在")
@@ -235,10 +289,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/approve")
-    def approve_form(storyboard_id: str, request: Request, session: Session = Depends(session_dependency)):
+    def approve_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
         user = html_user(request, session)
         if user is None:
             return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
         storyboard = session.get(Storyboard, storyboard_id)
         if storyboard is None:
             raise HTTPException(404, "分镜不存在")
@@ -254,7 +309,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if user.role != "admin":
             allowed = {project.id for project in session.scalars(select(Project)) if user.id == project.created_by_id or any(m.id == user.id for m in project.members)}
             tasks = [task for task in tasks if task.project_id in allowed]
-        return templates.TemplateResponse(request, "queue.html", {"user": user, "tasks": tasks, "page": "queue"})
+        return templates.TemplateResponse(request, "queue.html", {"user": user, "tasks": tasks, "page": "queue", "csrf_token": request.session["csrf"]})
 
     @app.get("/models", response_class=HTMLResponse)
     def models_page(request: Request, session: Session = Depends(session_dependency)):
@@ -263,7 +318,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         require_admin(user)
         profiles = list(session.scalars(select(ModelProfile).order_by(ModelProfile.display_name)))
-        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "page": "models"})
+        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "page": "models", "csrf_token": request.session["csrf"]})
 
     @app.get("/api/projects")
     def api_projects(user: User = Depends(current_user), session: Session = Depends(session_dependency)):
@@ -318,9 +373,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         profile = session.scalar(select(ModelProfile).where(ModelProfile.slug == payload.model_slug))
         if profile is None:
             raise HTTPException(404, "模型 Profile 不存在")
-        admit_generation(profile, duration_seconds=payload.duration_seconds, aspect_ratio=payload.aspect_ratio)
+        validate_model_for_shot(shot, profile)
+        preset = admit_generation(profile, duration_seconds=payload.duration_seconds, aspect_ratio=payload.aspect_ratio)
+        estimated_temp_bytes = 1 if profile.adapter_type == "demo" else max(20 * 1024**3, int(payload.duration_seconds * 4 * 1024**3))
         StorageGuard(settings.asset_dir, minimum_free_bytes=settings.minimum_free_bytes).ensure_capacity(
-            estimated_temp_bytes=payload.estimated_temp_bytes
+            estimated_temp_bytes=estimated_temp_bytes
         )
         task = Task(
             project_id=project.id,
@@ -331,6 +388,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status="queued",
             priority=priority,
             payload_json={},
+            model_version_snapshot=profile.model_version,
+            quantization_snapshot=profile.quantization,
+            model_config_fingerprint=model_config_fingerprint(profile),
+            runtime_config_snapshot=profile.runtime_config_json,
+            estimated_temp_bytes=estimated_temp_bytes,
         )
         session.add(task)
         session.flush()
@@ -343,6 +405,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "duration_seconds": payload.duration_seconds,
             "aspect_ratio": payload.aspect_ratio,
             "seed": payload.seed,
+            "minimum_free_bytes": settings.minimum_free_bytes,
+            "validated_preset": preset,
         }
         session.add(
             AuditLog(
@@ -354,6 +418,266 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         )
         return {"id": task.id, "status": task.status, "priority": task.priority, "model": profile.slug}
+
+    @app.patch("/api/shots/{shot_id}")
+    def api_update_shot(
+        shot_id: str,
+        payload: ShotUpdate,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        shot = session.get(Shot, shot_id)
+        if shot is None:
+            raise HTTPException(404, "镜头不存在")
+        assert_project_access(user, shot.storyboard.project)
+        if shot.storyboard.status != "draft":
+            raise HTTPException(409, "只有草稿分镜可以编辑")
+        shot.title = payload.title.strip()
+        shot.prompt = payload.prompt.strip()
+        shot.duration_seconds = payload.duration_seconds
+        shot.aspect_ratio = payload.aspect_ratio
+        session.add(
+            AuditLog(
+                actor_id=user.id,
+                action="shot.update",
+                entity_type="shot",
+                entity_id=shot.id,
+            )
+        )
+        return {
+            "id": shot.id,
+            "title": shot.title,
+            "prompt": shot.prompt,
+            "duration_seconds": shot.duration_seconds,
+            "aspect_ratio": shot.aspect_ratio,
+        }
+
+    @app.post("/api/admin/users", status_code=201)
+    def api_create_member(
+        payload: MemberCreate,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        try:
+            member = create_member(session, user, payload.username, payload.password)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"id": member.id, "username": member.username, "role": member.role}
+
+    @app.post("/api/projects/{project_id}/members")
+    def api_add_project_member(
+        project_id: str,
+        payload: ProjectMemberAdd,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        require_admin(user)
+        project = session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        member = session.scalar(select(User).where(User.username == payload.username.strip(), User.is_active.is_(True)))
+        if member is None:
+            raise HTTPException(404, "成员不存在或已停用")
+        if member not in project.members:
+            project.members.append(member)
+            session.add(
+                AuditLog(
+                    actor_id=user.id,
+                    action="project.member_add",
+                    entity_type="project",
+                    entity_id=project.id,
+                    details_json={"user_id": member.id},
+                )
+            )
+        return {"project_id": project.id, "username": member.username}
+
+    def load_task_with_access(task_id: str, user: User, session: Session) -> Task:
+        task = session.get(Task, task_id)
+        if task is None:
+            raise HTTPException(404, "任务不存在")
+        project = session.get(Project, task.project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        assert_project_access(user, project)
+        return task
+
+    @app.post("/api/tasks/{task_id}/cancel")
+    def api_cancel_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
+        task = load_task_with_access(task_id, user, session)
+        try:
+            QueueService(session).cancel(task)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        session.add(AuditLog(actor_id=user.id, action="task.cancel", entity_type="task", entity_id=task.id))
+        return {"id": task.id, "status": task.status}
+
+    @app.post("/api/tasks/{task_id}/pause")
+    def api_pause_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
+        task = load_task_with_access(task_id, user, session)
+        try:
+            QueueService(session).pause(task)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        session.add(AuditLog(actor_id=user.id, action="task.pause", entity_type="task", entity_id=task.id))
+        return {"id": task.id, "status": task.status}
+
+    @app.post("/api/tasks/{task_id}/resume")
+    def api_resume_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
+        task = load_task_with_access(task_id, user, session)
+        try:
+            QueueService(session).resume(task)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        session.add(AuditLog(actor_id=user.id, action="task.resume", entity_type="task", entity_id=task.id))
+        return {"id": task.id, "status": task.status}
+
+    @app.post("/api/tasks/{task_id}/retry")
+    def api_retry_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
+        require_admin(user)
+        task = load_task_with_access(task_id, user, session)
+        if task.status not in {"cancelled", "terminal_failed"}:
+            raise HTTPException(409, "只有已取消或终止失败的任务可以人工重试")
+        task.status = "queued"
+        task.attempts = 0
+        task.error_class = None
+        task.error_message = None
+        task.started_at = None
+        task.finished_at = None
+        session.add(AuditLog(actor_id=user.id, action="task.retry", entity_type="task", entity_id=task.id))
+        return {"id": task.id, "status": task.status}
+
+    @app.patch("/api/tasks/{task_id}/priority")
+    def api_update_task_priority(
+        task_id: str,
+        payload: TaskPriorityUpdate,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        task = load_task_with_access(task_id, user, session)
+        task.priority = validate_priority(user, payload.priority)
+        session.add(
+            AuditLog(
+                actor_id=user.id,
+                action="task.priority_update",
+                entity_type="task",
+                entity_id=task.id,
+                details_json={"priority": task.priority},
+            )
+        )
+        return {"id": task.id, "priority": task.priority}
+
+    @app.patch("/api/models/{model_slug}")
+    def api_toggle_model(
+        model_slug: str,
+        payload: ModelToggle,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        require_admin(user)
+        profile = session.scalar(select(ModelProfile).where(ModelProfile.slug == model_slug))
+        if profile is None:
+            raise HTTPException(404, "模型 Profile 不存在")
+        if payload.enabled:
+            validate_offline_profile(profile)
+        profile.enabled = payload.enabled
+        session.add(
+            AuditLog(
+                actor_id=user.id,
+                action="model.toggle",
+                entity_type="model_profile",
+                entity_id=profile.id,
+                details_json={"enabled": profile.enabled},
+            )
+        )
+        return {"slug": profile.slug, "enabled": profile.enabled}
+
+    @app.post("/api/projects/{project_id}/accept")
+    def api_accept_project(
+        project_id: str,
+        payload: AcceptanceRequest,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        require_admin(user)
+        project = session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        tasks = list(session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.created_at)))
+        if not tasks or any(task.status != "succeeded" for task in tasks):
+            raise HTTPException(409, "所有已创建任务成功后才能验收归档")
+        profiles = {
+            profile.id: profile
+            for profile in session.scalars(
+                select(ModelProfile).where(ModelProfile.id.in_({task.model_profile_id for task in tasks if task.model_profile_id}))
+            )
+        }
+        manifest = {
+            "schema_version": 1,
+            "project": {"id": project.id, "name": project.name, "status": "accepted"},
+            "storyboards": [
+                {
+                    "id": storyboard.id,
+                    "version": storyboard.version,
+                    "status": storyboard.status,
+                    "shots": [
+                        {
+                            "id": shot.id,
+                            "sequence_no": shot.sequence_no,
+                            "prompt": shot.prompt,
+                            "scene_type": shot.scene_type,
+                            "duration_seconds": shot.duration_seconds,
+                            "aspect_ratio": shot.aspect_ratio,
+                        }
+                        for shot in sorted(storyboard.shots, key=lambda item: item.sequence_no)
+                    ],
+                }
+                for storyboard in sorted(project.storyboards, key=lambda item: item.version)
+            ],
+            "tasks": [
+                {
+                    "id": task.id,
+                    "shot_id": task.shot_id,
+                    "model": profiles.get(task.model_profile_id).slug if profiles.get(task.model_profile_id) else None,
+                    "model_version": task.model_version_snapshot,
+                    "quantization": task.quantization_snapshot,
+                    "config_fingerprint": task.model_config_fingerprint,
+                    "duration_seconds": task.payload_json.get("duration_seconds"),
+                    "aspect_ratio": task.payload_json.get("aspect_ratio"),
+                    "seed": task.payload_json.get("seed"),
+                    "result": task.result_json,
+                }
+                for task in tasks
+            ],
+            "review": {"reviewer_id": user.id, "status": "accepted", "notes": payload.notes},
+        }
+        archive_folder = settings.archive_dir / project.id
+        archive_folder.mkdir(parents=True, exist_ok=True)
+        manifest_path = archive_folder / "manifest.json"
+        temporary_path = archive_folder / ".manifest.json.tmp"
+        encoded = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+        temporary_path.write_bytes(encoded)
+        temporary_path.replace(manifest_path)
+        digest = hashlib.sha256(encoded).hexdigest()
+        project.status = "accepted"
+        review = Review(project_id=project.id, reviewer_id=user.id, status="accepted", notes=payload.notes)
+        asset = Asset(
+            project_id=project.id,
+            kind="archive_manifest",
+            path=str(manifest_path),
+            sha256=digest,
+            metadata_json={"schema_version": 1},
+        )
+        session.add_all([review, asset])
+        session.add(
+            AuditLog(
+                actor_id=user.id,
+                action="project.accept",
+                entity_type="project",
+                entity_id=project.id,
+                details_json={"manifest_sha256": digest},
+            )
+        )
+        return {"project_id": project.id, "status": project.status, "manifest_path": str(manifest_path), "sha256": digest}
 
     @app.get("/api/models")
     def api_models(user: User = Depends(current_user), session: Session = Depends(session_dependency)):

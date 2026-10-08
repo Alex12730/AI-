@@ -29,12 +29,15 @@ def make_client(tmp_path):
 
 
 def login(client: TestClient, username: str):
+    login_page = client.get("/login")
+    token = login_page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
     response = client.post(
         "/login",
-        data={"username": username, "password": "a-strong-local-password"},
+        data={"username": username, "password": "a-strong-local-password", "csrf_token": token},
         follow_redirects=False,
     )
     assert response.status_code == 303
+    client.headers["X-CSRF-Token"] = response.headers["X-CSRF-Token"]
 
 
 def test_anonymous_user_is_redirected_to_login(tmp_path):
@@ -135,3 +138,16 @@ def test_admin_model_page_and_member_dashboard_permissions(tmp_path):
     assert models.status_code == 200
     assert "MiniMax H3" in models.text
     assert "未验证" in models.text
+
+
+def test_cross_origin_or_missing_csrf_is_rejected(tmp_path):
+    client, _app = make_client(tmp_path)
+    login(client, "member")
+    token = client.headers.pop("X-CSRF-Token")
+    assert client.post("/api/projects", json={"name": "x", "source_script": "y"}).status_code == 403
+    client.headers["X-CSRF-Token"] = token
+    assert client.post(
+        "/api/projects",
+        json={"name": "x", "source_script": "y"},
+        headers={"Origin": "http://evil.test"},
+    ).status_code == 403

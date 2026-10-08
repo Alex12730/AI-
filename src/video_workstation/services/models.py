@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import json
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -100,10 +102,20 @@ def seed_model_profiles(session: Session) -> list[ModelProfile]:
     for definition in PROFILE_DEFINITIONS:
         existing = session.scalar(select(ModelProfile).where(ModelProfile.slug == definition["slug"]))
         if existing is not None:
+            if existing.slug == "demo" and existing.validated_presets_json:
+                fingerprint = model_config_fingerprint(existing)
+                existing.validated_presets_json = [
+                    {**preset, "config_fingerprint": fingerprint}
+                    for preset in existing.validated_presets_json
+                ]
             profiles.append(existing)
             continue
         profile = ModelProfile(**definition)
         session.add(profile)
+        session.flush()
+        if profile.validated_presets_json:
+            fingerprint = model_config_fingerprint(profile)
+            profile.validated_presets_json = [{**preset, "config_fingerprint": fingerprint} for preset in profile.validated_presets_json]
         profiles.append(profile)
     session.flush()
     return profiles
@@ -121,7 +133,13 @@ def configure_local_profile(
     profile.model_version = version.strip() or "unconfigured"
     profile.quantization = quantization.strip() or "unconfigured"
     validate_offline_profile(profile)
+    profile.validated_presets_json = []
     return profile
+
+
+def model_config_fingerprint(profile: ModelProfile) -> str:
+    payload = {"version": profile.model_version, "quantization": profile.quantization, "runtime": profile.runtime_config_json}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def record_benchmark(
@@ -131,8 +149,16 @@ def record_benchmark(
     runs: list[dict[str, Any]],
 ) -> bool:
     history = list(profile.capabilities_json.get("benchmark_history", []))
-    success_count = sum(bool(run.get("success")) for run in runs)
-    has_blocking_failure = any(bool(run.get("oom")) or bool(run.get("corrupt")) for run in runs)
+    for run in runs:
+        for key in ("success", "oom", "corrupt"):
+            if type(run.get(key)) is not bool:
+                raise ValueError(f"基准字段 {key} 必须是布尔值")
+        if run["success"]:
+            for key in ("elapsed_seconds", "vram_peak_gb", "system_ram_peak_gb", "temperature_c", "av_sync_score"):
+                if not isinstance(run.get(key), (int, float)):
+                    raise ValueError(f"成功样本缺少数值指标: {key}")
+    success_count = sum(run["success"] for run in runs)
+    has_blocking_failure = any(run["oom"] or run["corrupt"] for run in runs)
     qualified = len(runs) == 10 and success_count / 10 >= 0.9 and not has_blocking_failure
     record = {
         "duration_seconds": duration_seconds,
@@ -162,6 +188,7 @@ def record_benchmark(
                 "aspect_ratio": aspect_ratio,
                 "success_rate": success_count / len(runs),
                 "run_count": len(runs),
+                "config_fingerprint": model_config_fingerprint(profile),
             }
         )
     profile.validated_presets_json = presets
@@ -176,10 +203,16 @@ def admit_generation(profile: ModelProfile, *, duration_seconds: float, aspect_r
             float(preset.get("duration_seconds", -1)) == float(duration_seconds)
             and preset.get("aspect_ratio") == aspect_ratio
         ):
-            return preset
+            if preset.get("config_fingerprint") == model_config_fingerprint(profile):
+                return preset
     raise ModelNotAdmitted(
         f"{profile.display_name} 的 {duration_seconds:g} 秒 {aspect_ratio} 档位未通过本机连续基准测试"
     )
+
+
+def validate_model_for_shot(shot, profile: ModelProfile) -> None:
+    if shot.scene_type == "product_ui" and profile.adapter_type != "demo":
+        raise ModelNotAdmitted("产品界面镜头必须使用真实录屏或截图动效，不能使用生成模型")
 
 
 def route_model_slug(scene_type: str, *, exact_dialogue: bool = False) -> str:

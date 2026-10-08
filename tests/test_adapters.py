@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 
 import pytest
 
@@ -51,3 +52,13 @@ def test_local_command_adapter_rejects_unknown_placeholders(tmp_path):
     adapter = LocalCommandAdapter(command=["runner", "{unknown}"], name="invalid")
     with pytest.raises(ValueError, match="不支持的命令占位符"):
         adapter.render_argv(request(tmp_path))
+
+
+def test_timeout_error_never_contains_prompt(tmp_path, monkeypatch):
+    sentinel = "PRIVATE_SCRIPT_SENTINEL"
+    adapter = LocalCommandAdapter(command=[sys.executable, "script.py", "{prompt}", "{output}"], name="safe")
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(argv, 1)))
+    result = adapter.execute(request(tmp_path, sentinel))
+    assert result.success is False
+    assert sentinel not in result.error_message
+    assert "超时" in result.error_message

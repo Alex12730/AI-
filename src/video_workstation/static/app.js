@@ -20,7 +20,7 @@ document.addEventListener("submit", async (event) => {
   try {
     const response = await fetch(`/api/shots/${form.dataset.shot}/enqueue`, {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": document.querySelector('input[name="csrf_token"]')?.value || ""},
       body: JSON.stringify(payload),
     });
     const data = await response.json();

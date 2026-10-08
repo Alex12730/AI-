@@ -5,8 +5,8 @@
 <header class="page-header project-header">
   <div><h1>{{ project.name }}</h1><p>分镜 v{{ storyboard.version }} · <span class="badge badge-{{ storyboard.status }}"><i></i>{{ storyboard.status }}</span></p></div>
   <div class="header-actions">
-    {% if storyboard.status == 'draft' %}<form method="post" action="/storyboards/{{ storyboard.id }}/submit"><button class="button button-primary" type="submit">提交审批</button></form>{% endif %}
-    {% if storyboard.status == 'pending_approval' and user.role == 'admin' %}<form method="post" action="/storyboards/{{ storyboard.id }}/approve"><button class="button button-primary" type="submit">批准分镜</button></form>{% endif %}
+    {% if storyboard.status == 'draft' %}<form method="post" action="/storyboards/{{ storyboard.id }}/submit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-primary" type="submit">提交审批</button></form>{% endif %}
+    {% if storyboard.status == 'pending_approval' and user.role == 'admin' %}<form method="post" action="/storyboards/{{ storyboard.id }}/approve"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-primary" type="submit">批准分镜</button></form>{% endif %}
   </div>
 </header>
 <section class="workflow-strip" aria-label="生产阶段">

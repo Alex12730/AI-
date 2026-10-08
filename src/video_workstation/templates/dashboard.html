@@ -16,6 +16,7 @@
 <section id="new-project" class="panel is-collapsed" aria-labelledby="new-project-title">
   <div class="panel-heading"><div><h2 id="new-project-title">建立新项目</h2><p>脚本会先拆成可编辑草案，不会立即占用 GPU。</p></div></div>
   <form class="project-form" method="post" action="/projects">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>项目名称<input name="name" maxlength="160" required placeholder="例如：新品功能演示片"></label>
     <label class="wide">原始脚本<textarea name="source_script" rows="5" required placeholder="每句内容会形成一个初始镜头。产品界面请明确写“真实录屏”。"></textarea></label>
     <div class="wide form-actions"><button class="button button-primary" type="submit">生成分镜草案</button></div>

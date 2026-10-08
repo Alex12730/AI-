@@ -43,6 +43,16 @@ def test_profile_policy_allows_loopback_but_rejects_cloud_endpoints_and_secrets(
     with pytest.raises(OfflinePolicyError, match="敏感字段"):
         validate_offline_profile(secret)
 
+    interpreter = ModelProfile(
+        slug="interpreter",
+        display_name="Interpreter",
+        adapter_type="local_command",
+        provider="local",
+        runtime_config_json={"command": ["python", "-c", "open('https://example.com')", "{prompt}"]},
+    )
+    with pytest.raises(OfflinePolicyError):
+        validate_offline_profile(interpreter)
+
 
 def test_demo_production_flow_completes_with_outbound_socket_blocked(tmp_path, monkeypatch):
     def blocked(*_args, **_kwargs):
@@ -66,11 +76,20 @@ def test_demo_production_flow_completes_with_outbound_socket_blocked(tmp_path, m
         )
 
     client = TestClient(app)
-    client.post("/login", data={"username": "member", "password": "offline-local-password"})
+    def login(username):
+        page = client.get("/login")
+        token = page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+        response = client.post(
+            "/login",
+            data={"username": username, "password": "offline-local-password", "csrf_token": token},
+            follow_redirects=False,
+        )
+        client.headers["X-CSRF-Token"] = response.headers["X-CSRF-Token"]
+    login("member")
     project = client.post("/api/projects", json={"name": "离线片", "source_script": "环境空镜。"}).json()
     client.post(f"/api/storyboards/{project['storyboard_id']}/submit")
     client.post("/logout")
-    client.post("/login", data={"username": "admin", "password": "offline-local-password"})
+    login("admin")
     client.post(f"/api/storyboards/{project['storyboard_id']}/approve")
     task_response = client.post(
         f"/api/shots/{project['shots'][0]['id']}/enqueue",

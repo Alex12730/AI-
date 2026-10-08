@@ -108,3 +108,12 @@ def test_all_core_entities_can_be_persisted(tmp_path):
         assert session.query(Review).count() == 1
         assert session.query(ModelProfile).count() == 1
         assert session.query(AuditLog).count() == 1
+
+
+def test_alembic_migrates_the_configured_non_default_database(tmp_path):
+    custom = tmp_path / "nested" / "custom.db"
+    database = Database(Settings(data_dir=tmp_path / "nested", database_url=f"sqlite:///{custom}"))
+    database.migrate()
+    assert custom.exists()
+    with database.engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261008_0002"

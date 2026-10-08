@@ -13,6 +13,7 @@ class OfflinePolicyError(ValueError):
 
 SENSITIVE_KEYS = {"api_key", "apikey", "token", "secret", "password", "cookie", "authorization"}
 NETWORK_CLIENTS = {"curl", "curl.exe", "wget", "wget.exe", "http", "https"}
+SHELL_EXECUTABLES = {"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "bash.exe", "sh"}
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -45,3 +46,12 @@ def validate_offline_profile(profile: ModelProfile) -> None:
         executable = Path(command[0]).name.lower()
         if executable in NETWORK_CLIENTS:
             raise OfflinePolicyError("本地模型命令不能直接调用网络下载器")
+        if executable in SHELL_EXECUTABLES:
+            raise OfflinePolicyError("本地模型命令不能通过通用 Shell 启动")
+        lowered = [item.lower() for item in command]
+        if executable.startswith("python") and any(item in {"-c", "-m"} for item in lowered[1:]):
+            raise OfflinePolicyError("Python 适配器必须指向固定脚本文件，不能使用 -c/-m")
+        for item in command:
+            parsed = urlparse(item)
+            if parsed.scheme in {"http", "https"} and parsed.hostname not in LOOPBACK_HOSTS:
+                raise OfflinePolicyError("命令参数不得包含外网 URL")

@@ -64,22 +64,23 @@ class LocalCommandAdapter:
                 timeout=self.timeout_seconds,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            message = "本地模型执行超时" if isinstance(exc, subprocess.TimeoutExpired) else "无法启动本地模型进程"
             return AdapterResult(
                 success=False,
                 output_path=request.output_path,
                 argv=argv,
                 error_class="infrastructure",
-                error_message=str(exc),
+                error_message=message,
             )
         if completed.returncode != 0:
-            message = (completed.stderr or completed.stdout or "本地模型命令失败")[-2000:]
-            error_class = "oom" if "out of memory" in message.lower() else "infrastructure"
+            raw = completed.stderr or completed.stdout or ""
+            error_class = "oom" if "out of memory" in raw.lower() else "infrastructure"
             return AdapterResult(
                 success=False,
                 output_path=request.output_path,
                 argv=argv,
                 error_class=error_class,
-                error_message=message,
+                error_message=f"本地模型进程退出码 {completed.returncode}",
             )
         if not request.output_path.exists():
             return AdapterResult(

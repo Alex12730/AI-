@@ -40,7 +40,12 @@ def bootstrap_admin(session: Session, username: str, password: str) -> User:
 
 def create_member(session: Session, actor: User, username: str, password: str) -> User:
     require_admin(actor)
-    member = User(username=username.strip(), password_hash=PasswordService().hash(password), role="member")
+    normalized = username.strip()
+    if len(normalized) < 3:
+        raise ValueError("用户名至少 3 个字符")
+    if session.scalar(select(User).where(User.username == normalized)) is not None:
+        raise ValueError("用户名已存在")
+    member = User(username=normalized, password_hash=PasswordService().hash(password), role="member")
     session.add(member)
     session.flush()
     session.add(

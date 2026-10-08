@@ -34,7 +34,7 @@
       <div class="sidebar-foot">
         <span class="status-line"><i class="status-dot status-ok"></i>纯本地模式</span>
         <span class="user-line"><strong>{{ user.username }}</strong><small>{{ '管理员' if user.role == 'admin' else '普通成员' }}</small></span>
-        <form action="/logout" method="post"><button class="button button-quiet button-full" type="submit">退出登录</button></form>
+        <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-quiet button-full" type="submit">退出登录</button></form>
       </div>
     </aside>
     <main id="main" class="workspace" tabindex="-1">

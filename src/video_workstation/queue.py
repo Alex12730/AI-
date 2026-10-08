@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -42,6 +43,7 @@ class QueueService:
             .values(
                 status="running",
                 leased_by=worker_id,
+                lease_token=uuid.uuid4().hex,
                 lease_expires_at=now + timedelta(seconds=lease_seconds),
                 heartbeat_at=now,
                 started_at=now,
@@ -66,36 +68,39 @@ class QueueService:
             task.error_class = "infrastructure"
             task.error_message = "Worker 租约过期"
             task.leased_by = None
+            task.lease_token = None
             task.lease_expires_at = None
             task.heartbeat_at = None
             recovered += 1
         self.session.flush()
         return recovered
 
-    def heartbeat(self, task: Task, worker_id: str, *, now: datetime | None = None, lease_seconds: int = 300) -> None:
-        if task.status != "running" or task.leased_by != worker_id:
+    def heartbeat(self, task: Task, worker_id: str, lease_token: str, *, now: datetime | None = None, lease_seconds: int = 300) -> None:
+        if task.status != "running" or task.leased_by != worker_id or task.lease_token != lease_token:
             raise ValueError("任务未由当前 Worker 认领")
         now = now or utcnow()
         task.heartbeat_at = now
         task.lease_expires_at = now + timedelta(seconds=lease_seconds)
 
-    def succeed(self, task: Task, result_json: dict) -> None:
-        if task.status != "running":
-            raise ValueError("只有运行中的任务可以完成")
+    def succeed(self, task: Task, result_json: dict, *, lease_token: str | None = None) -> None:
+        if task.status != "running" or (lease_token is not None and task.lease_token != lease_token):
+            raise ValueError("任务租约已失效，不能写回结果")
         task.status = "succeeded"
         task.result_json = result_json
         task.finished_at = utcnow()
         task.leased_by = None
+        task.lease_token = None
         task.lease_expires_at = None
 
-    def fail(self, task: Task, *, error_class: str, message: str) -> None:
-        if task.status != "running":
-            raise ValueError("只有运行中的任务可以失败")
+    def fail(self, task: Task, *, error_class: str, message: str, lease_token: str | None = None) -> None:
+        if task.status != "running" or (lease_token is not None and task.lease_token != lease_token):
+            raise ValueError("任务租约已失效，不能写回失败")
         task.error_class = error_class
         task.error_message = message[-2000:]
         retryable = error_class == "infrastructure" and task.attempts < task.max_attempts
         task.status = "queued" if retryable else "terminal_failed"
         task.leased_by = None
+        task.lease_token = None
         task.lease_expires_at = None
         task.heartbeat_at = None
         if not retryable:
@@ -106,3 +111,13 @@ class QueueService:
             raise ValueError("只有等待或可重试失败的任务可以取消")
         task.status = "cancelled"
         task.finished_at = utcnow()
+
+    def pause(self, task: Task) -> None:
+        if task.status != "queued":
+            raise ValueError("只有尚未运行的排队任务可以暂停")
+        task.status = "paused"
+
+    def resume(self, task: Task) -> None:
+        if task.status != "paused":
+            raise ValueError("只有已暂停任务可以恢复")
+        task.status = "queued"

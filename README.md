@@ -8,11 +8,12 @@
 
 - FastAPI + Jinja2 操作台、JSON API、Argon2 账号、成员/管理员权限。
 - 项目 → 分镜草案 → 提交 → 管理员审批 → 逐镜头入队。
+- 草稿镜头编辑、成员创建与项目授权、任务取消/重试/优先级、模型启停、管理员验收归档 API。
 - SQLite WAL 持久化队列、同级 FIFO、等待老化、单重型任务、Worker 心跳/租约恢复。
 - 基础设施错误自动重试一次；画质/OOM 不静默降级。
 - Demo、Wan、MiniMax H3 FL2VA、LTX 本地命令适配边界，统一 `shell=False` 参数数组。
 - H3 5/10/15 秒、16:9/9:16 独立十次基准门槛；无验证记录时 API 和界面均不开放。
-- 100GB 固定余量 + 两倍临时空间检查、系统生成资产路径、ffprobe 结构/音轨/时长检查。
+- 100GB 固定余量 + 两倍临时空间检查、系统生成资产路径、ffprobe 结构/音轨/时长检查；验收后生成带 SHA-256 的追溯清单。
 - MiniMax H3 许可证/NOTICE 元数据、纯本地 Profile 策略与阻断外部端点测试。
 - 桌面与移动端操作台；移动端表格在容器内滚动，不造成整页横向溢出。
 
@@ -44,6 +45,8 @@ $env:VIDEO_WORKSTATION_DATA_DIR = "D:\ai-video-data"
 ```
 
 浏览器访问 `http://127.0.0.1:8000`。需要局域网访问时，把 `run_web.ps1` 的 Host 改为指定办公网卡 IP，并用 Windows 防火墙仅允许批准的办公网段；不要直接监听公网。
+
+平台代码会拒绝云端端点、敏感配置、Shell 和 `python -c/-m` 等动态执行入口，但这不能替代操作系统隔离。生产 Worker 必须由防火墙或 WSL 网络策略禁止公网出站，只放行回环地址和明确的内网依赖；首次下载权重结束后再进入离线生产模式。
 
 ## WSL2 部署
 
@@ -99,6 +102,16 @@ data/                    默认运行数据（Git 忽略）
 ```
 
 数据库、输出、模型权重、`.env` 和虚拟环境均在 `.gitignore` 中。不要把真实素材、密码、Cookie、许可证密钥或权重提交到仓库。
+
+## 管理 API（MVP）
+
+- `PATCH /api/shots/{id}`：仅草稿阶段编辑镜头。
+- `POST /api/admin/users`、`POST /api/projects/{id}/members`：管理员创建成员并授权项目。
+- `POST /api/tasks/{id}/pause|resume|cancel|retry`、`PATCH /api/tasks/{id}/priority`：任务控制；P0 和人工重试仅管理员。
+- `PATCH /api/models/{slug}`：管理员启停本地模型 Profile。
+- `POST /api/projects/{id}/accept`：全部任务成功后验收，写入 `Review`、`Asset` 和归档 `manifest.json`。
+
+所有写接口都需要登录会话和 CSRF 请求头。Swagger 页面可查看字段，但实际调用应从登录后的同源管理界面或受控客户端发起。
 
 ## 验证
 

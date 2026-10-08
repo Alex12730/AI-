@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import Engine, create_engine, event
@@ -32,6 +33,17 @@ class Database:
     def create_schema(self) -> None:
         self.settings.ensure_directories()
         Base.metadata.create_all(self.engine)
+
+    def migrate(self) -> None:
+        from alembic import command
+        from alembic.config import Config
+
+        self.settings.ensure_directories()
+        project_root = Path(__file__).resolve().parents[2]
+        config = Config(str(project_root / "alembic.ini"))
+        config.set_main_option("script_location", str(project_root / "migrations"))
+        config.set_main_option("sqlalchemy.url", self.settings.database_url.replace("%", "%%"))
+        command.upgrade(config, "head")
 
     @contextmanager
     def session(self) -> Iterator[Session]:

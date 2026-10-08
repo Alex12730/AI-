@@ -131,3 +131,19 @@ def test_queued_task_can_be_cancelled(database):
         task = add_task(session, user, project, shot, profile)
         QueueService(session).cancel(task)
         assert task.status == "cancelled"
+
+
+def test_stale_worker_token_cannot_overwrite_reclaimed_task(database):
+    now = datetime.now(timezone.utc)
+    with database.session() as session:
+        user, project, shot, profile = seed(session)
+        add_task(session, user, project, shot, profile)
+    with database.session() as session:
+        first = QueueService(session).claim_next("worker-a", now=now, lease_seconds=1)
+        stale_token = first.lease_token
+    with database.session() as session:
+        QueueService(session).recover_expired(now=now + timedelta(seconds=2))
+        second = QueueService(session).claim_next("worker-b", now=now + timedelta(seconds=2))
+        assert second.lease_token != stale_token
+        with pytest.raises(ValueError, match="租约"):
+            QueueService(session).succeed(second, {}, lease_token=stale_token)

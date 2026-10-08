@@ -89,3 +89,14 @@ def test_local_profile_configuration_is_an_auditable_argv_array(session):
     assert configured.runtime_config_json["command"][0] == "python"
     assert configured.model_version == "H3-Base-2026-09"
     assert configured.quantization == "pruned-int8-ampere"
+
+
+def test_reconfiguration_invalidates_old_presets_and_string_booleans_are_rejected(session):
+    seed_model_profiles(session)
+    h3 = session.query(ModelProfile).filter_by(slug="minimax-h3-fl2va").one()
+    record_benchmark(h3, 5, "16:9", passing_runs())
+    assert h3.validated_presets_json
+    configure_local_profile(h3, command=["python", "run_h3.py", "{prompt}", "{output}"], version="new", quantization="int8")
+    assert h3.validated_presets_json == []
+    with pytest.raises(ValueError, match="布尔"):
+        record_benchmark(h3, 5, "16:9", [{"success": "false", "oom": False, "corrupt": False}] * 10)
