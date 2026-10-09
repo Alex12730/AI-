@@ -23,11 +23,11 @@
         <h2>登录工作站</h2>
         <p>使用管理员创建的局域网账号。</p>
       </div>
-      {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+      {% if error %}<div id="login-error" class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
       <form method="post" action="/login" class="form-stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>用户名<input name="username" autocomplete="username" required autofocus></label>
-        <label>密码<input type="password" name="password" autocomplete="current-password" required></label>
+        <label for="login-username">用户名<input id="login-username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus{% if error %} aria-invalid="true" aria-describedby="login-error"{% endif %}></label>
+        <label for="login-password">密码<input id="login-password" type="password" name="password" autocomplete="current-password" required{% if error %} aria-invalid="true" aria-describedby="login-error"{% endif %}></label>
         <button class="button button-primary" type="submit">进入制作台</button>
       </form>
       {% if needs_setup %}

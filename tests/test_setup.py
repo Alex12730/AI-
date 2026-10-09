@@ -29,6 +29,12 @@ def test_local_setup_creates_first_admin_and_signs_in(tmp_path):
     setup_page = client.get("/setup")
     assert setup_page.status_code == 200
     assert "创建首个管理员" in setup_page.text
+    assert 'id="setup-password-hint"' in setup_page.text
+    assert "base-uri 'none'" in setup_page.headers["Content-Security-Policy"]
+    assert "form-action 'self'" in setup_page.headers["Content-Security-Policy"]
+    assert "object-src 'none'" in setup_page.headers["Content-Security-Policy"]
+    assert setup_page.headers["Permissions-Policy"] == "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+    assert setup_page.headers["Cache-Control"] == "no-store"
     token = csrf_from(setup_page)
 
     created = client.post(
@@ -67,6 +73,8 @@ def test_setup_rejects_invalid_password_confirmation(tmp_path):
     )
     assert mismatch.status_code == 400
     assert "两次输入的密码不一致" in mismatch.text
+    assert 'id="setup-error"' in mismatch.text
+    assert 'aria-invalid="true"' in mismatch.text
 
     token = csrf_from(client.get("/setup"))
     too_short = client.post(
@@ -129,3 +137,10 @@ def test_login_page_links_to_setup_only_before_admin_exists(tmp_path):
         )
 
     assert 'href="/setup"' not in client.get("/login").text
+
+
+def test_static_assets_have_explicit_cache_policy(tmp_path):
+    client, _app = make_empty_client(tmp_path)
+    response = client.get("/static/app.css")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "public, max-age=3600, stale-while-revalidate=86400"

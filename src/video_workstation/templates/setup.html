@@ -23,15 +23,15 @@
         <h2>创建首个管理员</h2>
         <p>请设置仅用于这台工作站的独立密码。</p>
       </div>
-      {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+      {% if error %}<div id="setup-error" class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
       <form method="post" action="/setup" class="form-stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>用户名<input name="username" value="{{ username }}" minlength="3" maxlength="80" autocomplete="username" required autofocus></label>
-        <label>密码<input type="password" name="password" minlength="12" maxlength="200" autocomplete="new-password" required></label>
-        <label>确认密码<input type="password" name="password_confirm" minlength="12" maxlength="200" autocomplete="new-password" required></label>
+        <label for="setup-username">用户名<input id="setup-username" name="username" value="{{ username }}" minlength="3" maxlength="80" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus{% if error %} aria-invalid="true" aria-describedby="setup-error"{% endif %}></label>
+        <label for="setup-password">密码<input id="setup-password" type="password" name="password" minlength="12" maxlength="200" autocomplete="new-password" required aria-describedby="{% if error %}setup-error {% endif %}setup-password-hint"{% if error %} aria-invalid="true"{% endif %}></label>
+        <label for="setup-password-confirm">确认密码<input id="setup-password-confirm" type="password" name="password_confirm" minlength="12" maxlength="200" autocomplete="new-password" required aria-describedby="{% if error %}setup-error {% endif %}setup-password-hint"{% if error %} aria-invalid="true"{% endif %}></label>
         <button class="button button-primary" type="submit">创建并进入工作站</button>
       </form>
-      <p class="microcopy">密码至少 12 个字符。请不要在聊天或代码中发送密码。</p>
+      <p id="setup-password-hint" class="microcopy">密码至少 12 个字符。请不要在聊天或代码中发送密码。</p>
     </section>
   </main>
 </body>

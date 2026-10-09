@@ -214,9 +214,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
+            "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'self'; "
+            "frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; "
+            "script-src 'self'; style-src 'self'"
         )
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=3600, stale-while-revalidate=86400"
+        else:
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.exception_handler(PermissionDenied)
@@ -294,7 +301,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": None, "csrf_token": request.session["csrf"], "needs_setup": not admin_exists(session)},
+            {"error": None, "csrf_token": request.session["csrf"], "needs_setup": not admin_exists(session), "username": ""},
         )
 
     @app.post("/login")
@@ -311,7 +318,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {"error": "用户名或密码错误", "csrf_token": csrf_token},
+                {
+                    "error": "用户名或密码错误",
+                    "csrf_token": csrf_token,
+                    "needs_setup": not admin_exists(session),
+                    "username": username.strip(),
+                },
                 status_code=401,
             )
         request.session.clear()

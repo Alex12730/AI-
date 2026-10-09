@@ -15,21 +15,21 @@
         <span class="brand-mark" aria-hidden="true">AV</span>
         <span><strong>片场调度台</strong><small>LOCAL WORKSTATION</small></span>
       </a>
-      <nav>
-        <a class="nav-link {% if page == 'dashboard' %}is-active{% endif %}" href="/">
+      <nav aria-label="主要功能">
+        <a class="nav-link {% if page == 'dashboard' %}is-active{% endif %}" href="/"{% if page == 'dashboard' %} aria-current="page"{% endif %}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg>
           制作工作台
         </a>
-        <a class="nav-link {% if page == 'queue' %}is-active{% endif %}" href="/queue">
+        <a class="nav-link {% if page == 'queue' %}is-active{% endif %}" href="/queue"{% if page == 'queue' %} aria-current="page"{% endif %}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
           任务队列
         </a>
         {% if user.role == 'admin' %}
-        <a class="nav-link {% if page == 'system' %}is-active{% endif %}" href="/system">
+        <a class="nav-link {% if page == 'system' %}is-active{% endif %}" href="/system"{% if page == 'system' %} aria-current="page"{% endif %}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18v-5m5 5V8m5 10v-3m5 3V4M3 21h18"/></svg>
           运行状态
         </a>
-        <a class="nav-link {% if page == 'models' %}is-active{% endif %}" href="/models">
+        <a class="nav-link {% if page == 'models' %}is-active{% endif %}" href="/models"{% if page == 'models' %} aria-current="page"{% endif %}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 0v18M4 7l8 4 8-4"/></svg>
           模型与准入
         </a>
@@ -45,5 +45,6 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+  <div id="app-status" class="app-status" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 </body>
 </html>

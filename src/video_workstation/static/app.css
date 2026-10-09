@@ -21,6 +21,7 @@
   line-height: 1.55;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { background: var(--canvas); color: var(--ink); }
 body { margin: 0; min-width: 320px; }
 button, input, textarea, select { font: inherit; }
@@ -198,6 +199,8 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: .82em; }
 .form-stack { display: grid; gap: 1rem; }
 .microcopy { font-size: .76rem; }
 .setup-link { display: block; text-align: center; text-decoration: none; }
+.app-status { position: fixed; right: 1rem; bottom: 1rem; z-index: 200; width: min(420px, calc(100vw - 2rem)); border: 1px solid #b8cfc6; border-radius: 10px; padding: .85rem 1rem; background: var(--green-soft); color: var(--green); box-shadow: 0 10px 30px rgba(23, 33, 43, .18); font-weight: 700; }
+.app-status.is-error { border-color: #e8b8b2; background: var(--red-soft); color: var(--red); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (max-width: 940px) {
   .app-shell { grid-template-columns: 1fr; }

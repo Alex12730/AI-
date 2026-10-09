@@ -48,6 +48,31 @@ def test_anonymous_user_is_redirected_to_login(tmp_path):
     assert client.get("/health").json()["status"] == "ok"
 
 
+def test_login_error_is_accessible_and_preserves_username(tmp_path):
+    client, _app = make_client(tmp_path)
+    login_page = client.get("/login")
+    token = login_page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+    response = client.post(
+        "/login",
+        data={"username": "member", "password": "wrong-password", "csrf_token": token},
+    )
+    assert response.status_code == 401
+    assert 'id="login-error"' in response.text
+    assert 'aria-invalid="true"' in response.text
+    assert 'value="member"' in response.text
+
+
+def test_dashboard_exposes_navigation_and_disclosure_state(tmp_path):
+    client, _app = make_client(tmp_path)
+    login(client, "member")
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'aria-current="page"' in response.text
+    assert 'aria-controls="new-project"' in response.text
+    assert 'aria-expanded="false"' in response.text
+    assert 'id="new-project" class="panel is-collapsed" aria-labelledby="new-project-title" hidden' in response.text
+
+
 def test_project_approval_and_demo_enqueue_flow(tmp_path):
     client, app = make_client(tmp_path)
     login(client, "member")
