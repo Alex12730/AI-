@@ -52,6 +52,17 @@ $env:VIDEO_WORKSTATION_DATA_DIR = "D:\ai-video-data"
 
 浏览器访问 `http://127.0.0.1:8000`。需要局域网访问时，把 `run_web.ps1` 的 Host 改为指定办公网卡 IP，并用 Windows 防火墙仅允许批准的办公网段；不要直接监听公网。
 
+### Windows 登录后自动启动
+
+如果希望关闭 Codex 或重新登录 Windows 后工作站仍能使用，以当前 Windows 用户运行：
+
+```powershell
+Set-Location D:\workspace\AI视频自动化工作流任务
+.\scripts\install_scheduled_tasks.ps1 -StartNow
+```
+
+该命令登记 `AI-Video-Workstation-Web` 和 `AI-Video-Workstation-Worker` 两个当前用户登录触发的计划任务。Web 使用 `data/.session-secret` 中自动生成的本机随机会话密钥；现有数据库和素材不会重建。运行日志位于 `data/web-service.*.log` 和 `data/worker-service.*.log`。
+
 管理员登录后可访问 `http://127.0.0.1:8000/system`。这里的“已登记”“已配置”“已准入”是三个不同状态：只有当前配置指纹仍匹配本机基准记录的模型才显示为已准入；运行监控正常也不代表已经完成 A6000 生产验收。
 
 ## 本地合成与字幕
