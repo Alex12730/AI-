@@ -25,6 +25,10 @@
           任务队列
         </a>
         {% if user.role == 'admin' %}
+        <a class="nav-link {% if page == 'system' %}is-active{% endif %}" href="/system">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18v-5m5 5V8m5 10v-3m5 3V4M3 21h18"/></svg>
+          运行状态
+        </a>
         <a class="nav-link {% if page == 'models' %}is-active{% endif %}" href="/models">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 0v18M4 7l8 4 8-4"/></svg>
           模型与准入
@@ -32,7 +36,7 @@
         {% endif %}
       </nav>
       <div class="sidebar-foot">
-        <span class="status-line"><i class="status-dot status-ok"></i>纯本地模式</span>
+        <span class="status-line"><i class="status-dot status-{{ system_summary.level }}"></i>{{ system_summary.label }}</span>
         <span class="user-line"><strong>{{ user.username }}</strong><small>{{ '管理员' if user.role == 'admin' else '普通成员' }}</small></span>
         <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-quiet button-full" type="submit">退出登录</button></form>
       </div>

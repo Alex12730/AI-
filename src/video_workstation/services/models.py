@@ -148,6 +148,29 @@ def model_config_fingerprint(profile: ModelProfile) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def model_readiness(profile: ModelProfile) -> str:
+    if profile.adapter_type == "demo":
+        return "demo"
+    command = profile.runtime_config_json.get("command") if isinstance(profile.runtime_config_json, dict) else None
+    configured = (
+        isinstance(command, list)
+        and bool(command)
+        and all(isinstance(part, str) and part for part in command)
+        and profile.model_version not in {"", "unconfigured"}
+        and profile.quantization not in {"", "unconfigured"}
+    )
+    if not configured:
+        return "registered"
+    try:
+        validate_offline_profile(profile)
+    except Exception:
+        return "registered"
+    fingerprint = model_config_fingerprint(profile)
+    if any(preset.get("config_fingerprint") == fingerprint for preset in (profile.validated_presets_json or [])):
+        return "admitted"
+    return "configured"
+
+
 def record_benchmark(
     profile: ModelProfile,
     duration_seconds: float,

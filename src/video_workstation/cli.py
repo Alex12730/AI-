@@ -13,6 +13,7 @@ from .db import Database
 from .models import ModelProfile
 from .services.models import configure_local_profile, record_benchmark, seed_model_profiles
 from .services.projects import bootstrap_admin
+from .services.workers import touch_worker
 from .worker import Worker
 
 
@@ -67,6 +68,8 @@ def main() -> None:
                     return
                 time.sleep(1 if worked else 3)
         except KeyboardInterrupt:
+            with database.session() as session:
+                touch_worker(session, database.settings.worker_id, "stopped")
             print("Worker 已停止")
             return
     if args.command == "configure-model":

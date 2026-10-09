@@ -6,8 +6,9 @@ import pytest
 
 from video_workstation.config import Settings
 from video_workstation.db import Database
-from video_workstation.models import ModelProfile, Project, Shot, Storyboard, Task, User
+from video_workstation.models import ModelProfile, Project, Shot, Storyboard, Task, User, WorkerStatus
 from video_workstation.queue import QueueService
+from video_workstation.services.workers import touch_worker
 
 
 @pytest.fixture()
@@ -147,3 +148,15 @@ def test_stale_worker_token_cannot_overwrite_reclaimed_task(database):
         assert second.lease_token != stale_token
         with pytest.raises(ValueError, match="租约"):
             QueueService(session).succeed(second, {}, lease_token=stale_token)
+
+
+def test_touch_worker_upserts_one_runtime_record(database):
+    now = datetime.now(timezone.utc)
+    with database.session() as session:
+        first = touch_worker(session, "gpu-worker-1", "idle", now=now)
+        first_id = first.id
+    with database.session() as session:
+        second = touch_worker(session, "gpu-worker-1", "running", now=now + timedelta(seconds=5))
+        assert second.id == first_id
+        assert second.state == "running"
+        assert session.query(WorkerStatus).count() == 1

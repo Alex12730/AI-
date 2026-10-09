@@ -28,6 +28,7 @@ from .services.models import (
     model_config_fingerprint,
     seed_model_profiles,
     validate_model_for_shot,
+    model_readiness,
 )
 from .services.projects import (
     PermissionDenied,
@@ -46,10 +47,17 @@ from .services.projects import (
     withdraw_storyboard,
 )
 from .storage import InsufficientStorage, StorageGuard, generated_asset_path
+from .services.system_status import collect_system_status
 
 
 PACKAGE_DIR = Path(__file__).parent
-templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+
+
+def status_context(request: Request) -> dict:
+    return {"system_summary": getattr(request.app.state, "system_status_summary", {"level": "unavailable", "label": "状态未检查"})}
+
+
+templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"), context_processors=[status_context])
 
 
 class ProjectCreate(BaseModel):
@@ -131,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="AI 视频自动化工作站", version="0.1.0", docs_url="/api/docs")
     app.state.settings = settings
     app.state.database = database
+    app.state.system_status_summary = {"level": "unavailable", "label": "状态未检查"}
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
@@ -476,7 +485,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         require_admin(user)
         profiles = list(session.scalars(select(ModelProfile).order_by(ModelProfile.display_name)))
-        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "page": "models", "csrf_token": request.session["csrf"]})
+        readiness_by_slug = {profile.slug: model_readiness(profile) for profile in profiles}
+        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "readiness_by_slug": readiness_by_slug, "page": "models", "csrf_token": request.session["csrf"]})
+
+    def refresh_system_status(request: Request, session: Session):
+        system_status = collect_system_status(session, settings)
+        severities = {alert.severity for alert in system_status.alerts}
+        if "critical" in severities:
+            summary = {"level": "critical", "label": "需要处理"}
+        elif "warning" in severities:
+            summary = {"level": "warning", "label": "存在警告"}
+        elif system_status.gpu.status == "unavailable":
+            summary = {"level": "unavailable", "label": "GPU 状态不可用"}
+        else:
+            summary = {"level": "ok", "label": "运行正常"}
+        request.app.state.system_status_summary = summary
+        return system_status
+
+    @app.get("/system", response_class=HTMLResponse)
+    def system_page(request: Request, session: Session = Depends(session_dependency)):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        require_admin(user)
+        system_status = refresh_system_status(request, session)
+        return templates.TemplateResponse(
+            request,
+            "system.html",
+            {"user": user, "status": system_status, "page": "system", "csrf_token": request.session["csrf"]},
+        )
+
+    @app.get("/api/system/status")
+    def api_system_status(
+        request: Request,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        require_admin(user)
+        return refresh_system_status(request, session).to_dict()
 
     @app.get("/api/projects")
     def api_projects(user: User = Depends(current_user), session: Session = Depends(session_dependency)):

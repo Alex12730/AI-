@@ -14,6 +14,7 @@ from video_workstation.models import (
     Storyboard,
     Task,
     User,
+    WorkerStatus,
 )
 
 
@@ -28,6 +29,7 @@ EXPECTED_TABLES = {
     "reviews",
     "model_profiles",
     "audit_logs",
+    "worker_statuses",
 }
 
 
@@ -116,4 +118,32 @@ def test_alembic_migrates_the_configured_non_default_database(tmp_path):
     database.migrate()
     assert custom.exists()
     with database.engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261008_0002"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261009_0003"
+
+
+def test_worker_status_is_unique_and_task_reference_is_cleared(tmp_path):
+    settings = Settings(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'app.db'}")
+    database = Database(settings)
+    database.create_schema()
+
+    with database.session() as session:
+        user = User(username="member", password_hash="hash", role="member")
+        session.add(user)
+        session.flush()
+        project = Project(name="片子", created_by_id=user.id)
+        session.add(project)
+        session.flush()
+        task = Task(project_id=project.id, created_by_id=user.id, status="running")
+        session.add(task)
+        session.flush()
+        status = WorkerStatus(worker_id="gpu-worker-1", state="running", current_task_id=task.id)
+        session.add(status)
+        session.flush()
+        status_id = status.id
+        session.delete(task)
+
+    with database.session() as session:
+        saved = session.get(WorkerStatus, status_id)
+        assert saved.worker_id == "gpu-worker-1"
+        assert saved.state == "running"
+        assert saved.current_task_id is None

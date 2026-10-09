@@ -151,6 +151,20 @@ class Task(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class WorkerStatus(Base):
+    __tablename__ = "worker_statuses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    worker_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    state: Mapped[str] = mapped_column(String(20), default="starting", index=True)
+    current_task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    details_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class Asset(Base):
     __tablename__ = "assets"
 

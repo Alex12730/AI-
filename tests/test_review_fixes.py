@@ -7,7 +7,7 @@ import pytest
 from video_workstation.adapters.base import AdapterResult
 from video_workstation.config import Settings
 from video_workstation.db import Database
-from video_workstation.models import AuditLog, ModelProfile, Project, Shot, Storyboard, Task, User
+from video_workstation.models import AuditLog, ModelProfile, Project, Shot, Storyboard, Task, User, WorkerStatus
 from video_workstation.services.models import ModelNotAdmitted, model_config_fingerprint, validate_model_for_shot
 from video_workstation.worker import Worker
 
@@ -46,6 +46,9 @@ def test_worker_commits_claim_before_execution_and_invalid_media_fails_quality(t
         assert task.status == "terminal_failed"
         assert task.error_class == "quality"
         assert session.query(AuditLog).filter_by(action="concurrent.write").count() == 1
+        worker = session.query(WorkerStatus).filter_by(worker_id="worker").one()
+        assert worker.state == "idle"
+        assert worker.current_task_id is None
 
 
 def test_product_ui_rejects_generative_profiles():
