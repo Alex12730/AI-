@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from video_workstation.config import Settings
 from video_workstation.db import Database
@@ -12,7 +13,10 @@ from video_workstation.services.models import (
     configure_local_profile,
     record_benchmark,
     seed_model_profiles,
+    model_config_fingerprint,
+    video2x_is_admitted,
 )
+from video_workstation.postproduction import execute_video2x
 
 
 @pytest.fixture()
@@ -160,3 +164,33 @@ def test_twenty_second_benchmark_is_ltx_only(session):
     ltx.enabled = True
     assert record_benchmark(ltx, 20, "9:16", passing_runs()) is True
     assert admit_generation(ltx, duration_seconds=20, aspect_ratio="9:16")["duration_seconds"] == 20
+
+
+def test_video2x_requires_enabled_current_scale_admission_and_safe_placeholders(session, tmp_path):
+    seed_model_profiles(session)
+    profile = session.query(ModelProfile).filter_by(slug="video2x").one()
+    configure_local_profile(
+        profile,
+        command=["video2x", "--input", "{input}", "--output", "{output}", "--scale", "{scale}"],
+        version="local-1",
+        quantization="realesrgan",
+    )
+    assert video2x_is_admitted(profile) is False
+    profile.enabled = True
+    profile.validated_presets_json = [{"scale": 2, "config_fingerprint": model_config_fingerprint(profile)}]
+    assert video2x_is_admitted(profile) is True
+
+    source = tmp_path / "输入 视频.mp4"; source.write_bytes(b"source")
+    output = tmp_path / "输出 视频.mp4"
+    captured = {}
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        output.write_bytes(b"upscaled")
+        return SimpleNamespace(returncode=0)
+    result = execute_video2x(profile, source, output, run=fake_run)
+    assert result.success is True
+    assert str(source) in captured["argv"] and str(output) in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--scale") + 1] == "2"
+
+    profile.runtime_config_json = {"command": ["video2x", "{input}", "{output}", "{unknown}"]}
+    assert execute_video2x(profile, source, output, run=fake_run).success is False

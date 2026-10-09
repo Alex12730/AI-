@@ -222,8 +222,14 @@ def test_project_page_previews_assets_without_exposing_local_paths(tmp_path):
             metadata_json={"source": "upload", "qc": {"duration_seconds": 5, "width": 1920, "height": 1080}},
         )
         session.add(asset)
+        composite = Asset(
+            project_id=project["id"], kind="composite", path=str(media), sha256="def",
+            metadata_json={"qc": {"passed": True, "duration_seconds": 5, "width": 1920, "height": 1080}},
+        )
+        session.add(composite)
         session.flush()
         asset_id = asset.id
+        composite_id = composite.id
 
     page = client.get(f"/projects/{project['id']}")
     assert page.status_code == 200
@@ -231,7 +237,50 @@ def test_project_page_previews_assets_without_exposing_local_paths(tmp_path):
     assert f'href="/assets/{asset_id}/content?download=1"' in page.text
     assert "真实录屏" in page.text
     assert "1920×1080" in page.text
+    assert "项目成片" in page.text
+    assert f'src="/assets/{composite_id}/content"' in page.text
     assert str(media) not in page.text
+
+
+def test_admin_can_queue_local_project_composition(tmp_path):
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post("/api/projects", json={"name": "本地合成", "source_script": "环境空镜。"}).json()
+    client.post(f"/api/storyboards/{project['storyboard_id']}/submit")
+    client.post("/logout")
+    login(client, "admin")
+    client.post(f"/api/storyboards/{project['storyboard_id']}/approve")
+    media = app.state.settings.asset_dir / project["id"] / "source.mp4"
+    media.parent.mkdir(parents=True, exist_ok=True)
+    media.write_bytes(b"local-video")
+    with app.state.database.session() as session:
+        asset = Asset(
+            project_id=project["id"], shot_id=project["shots"][0]["id"], kind="video", path=str(media), sha256="x",
+            metadata_json={"qc": {"passed": True, "duration_seconds": 5, "width": 1920, "height": 1080}},
+        )
+        session.add(asset); session.flush(); asset_id = asset.id
+
+    page = client.get(f"/projects/{project['id']}")
+    assert "本地合成成片" in page.text
+    assert f'<option value="{asset_id}">' in page.text
+    response = client.post(
+        f"/api/projects/{project['id']}/compose",
+        json={"asset_ids": [asset_id], "subtitle_asset_id": None, "aspect_ratio": "16:9", "priority": 1},
+    )
+    assert response.status_code == 201
+    task_id = response.json()["id"]
+    with app.state.database.session() as session:
+        task = session.get(Task, task_id)
+        assert task.task_type == "compose_project"
+        assert task.model_profile_id is None
+        assert task.payload_json["asset_ids"] == [asset_id]
+
+    client.post("/logout"); login(client, "member")
+    denied = client.post(
+        f"/api/projects/{project['id']}/compose",
+        json={"asset_ids": [asset_id], "subtitle_asset_id": None, "aspect_ratio": "16:9", "priority": 1},
+    )
+    assert denied.status_code == 403
 
 
 def test_draft_page_bulk_updates_all_shots_then_allows_single_override(tmp_path):

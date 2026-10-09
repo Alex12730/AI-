@@ -31,6 +31,7 @@ from .services.models import (
     seed_model_profiles,
     validate_model_for_shot,
     model_readiness,
+    video2x_is_admitted,
 )
 from .services.projects import (
     PermissionDenied,
@@ -53,6 +54,8 @@ from .storage import InsufficientStorage, StorageGuard, generated_asset_path
 from .services.system_status import collect_system_status
 from .services.assets import store_uploaded_video
 from .media import InvalidRange, iter_file_range, parse_range_header, resolve_asset_path
+from .subtitles import store_subtitle_asset
+from .services.postproduction import create_compose_task
 
 
 PACKAGE_DIR = Path(__file__).parent
@@ -107,6 +110,14 @@ class ModelToggle(BaseModel):
 
 class AcceptanceRequest(BaseModel):
     notes: str = Field(default="", max_length=10_000)
+
+
+class ComposeRequest(BaseModel):
+    asset_ids: list[str] = Field(min_length=1)
+    subtitle_asset_id: str | None = None
+    aspect_ratio: str = Field(pattern=r"^(16:9|9:16)$")
+    priority: int = Field(default=1, ge=0, le=2)
+    upscale: bool = False
 
 
 def serialize_project(project: Project) -> dict:
@@ -371,6 +382,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 .order_by(Asset.created_at.desc())
             )
         )
+        subtitle_assets = list(
+            session.scalars(
+                select(Asset)
+                .where(Asset.project_id == project.id, Asset.kind == "subtitle")
+                .order_by(Asset.created_at.desc())
+            )
+        )
+        delivery_assets = list(
+            session.scalars(
+                select(Asset)
+                .where(Asset.project_id == project.id, Asset.kind.in_(("composite", "upscaled")))
+                .order_by(Asset.created_at.desc())
+            )
+        )
+        delivery_views: list[dict] = []
+        for asset in delivery_assets:
+            qc = asset.metadata_json.get("qc", {})
+            try:
+                resolve_asset_path(asset, settings)
+                available = True
+            except ValueError:
+                available = False
+            delivery_views.append({
+                "id": asset.id,
+                "kind": asset.kind,
+                "label": "Video2X 超分版本" if asset.kind == "upscaled" else "FFmpeg 合成成片",
+                "available": available,
+                "duration_seconds": qc.get("duration_seconds"),
+                "width": qc.get("width"),
+                "height": qc.get("height"),
+                "created_at": asset.created_at,
+            })
         for asset in video_assets:
             if asset.shot_id is None:
                 continue
@@ -394,8 +437,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "quantization": task.quantization_snapshot if task else "",
                     "seed": task.payload_json.get("seed") if task else None,
                     "created_at": asset.created_at,
+                    "qc_passed": bool(qc.get("passed")),
                 }
             )
+        compose_asset_views_by_shot = {
+            shot_id: [view for view in views if view["available"] and view["qc_passed"]]
+            for shot_id, views in asset_views_by_shot.items()
+        }
+        approved_shots = [shot for shot in storyboard.shots if shot.status == "approved"]
+        compose_missing_shots = [shot for shot in approved_shots if not compose_asset_views_by_shot.get(shot.id)]
+        video2x_profile = next((profile for profile in profiles if profile.slug == "video2x"), None)
+        video2x_admitted = bool(video2x_profile and video2x_is_admitted(video2x_profile, scale=2))
         return templates.TemplateResponse(
             request,
             "project.html",
@@ -410,6 +462,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "scene_types": SHOT_SCENE_TYPES,
                 "tasks": tasks,
                 "asset_views_by_shot": asset_views_by_shot,
+                "subtitle_assets": subtitle_assets,
+                "compose_asset_views_by_shot": compose_asset_views_by_shot,
+                "compose_missing_shots": compose_missing_shots,
+                "compose_default_aspect_ratio": approved_shots[0].aspect_ratio if approved_shots else "16:9",
+                "video2x_admitted": video2x_admitted,
+                "delivery_views": delivery_views,
                 "page": "projects",
                 "csrf_token": request.session["csrf"],
             },
@@ -450,6 +508,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
+
+    @app.post("/projects/{project_id}/subtitles")
+    async def upload_project_subtitle(
+        project_id: str,
+        request: Request,
+        subtitle: UploadFile = File(...),
+        csrf_token: str = Form(...),
+        session: Session = Depends(session_dependency),
+    ):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+        require_admin(user)
+        project = session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        content = await subtitle.read(2 * 1024 * 1024 + 1)
+        try:
+            store_subtitle_asset(session, project, user, subtitle.filename or "", content, settings)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/shot-settings")
     def update_storyboard_shot_settings_form(
@@ -558,6 +639,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type=media_type,
             headers=headers,
         )
+
+    @app.post("/api/projects/{project_id}/compose", status_code=201)
+    def api_compose_project(
+        project_id: str,
+        payload: ComposeRequest,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        project = session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        try:
+            task = create_compose_task(
+                session,
+                user,
+                project,
+                asset_ids=payload.asset_ids,
+                subtitle_asset_id=payload.subtitle_asset_id,
+                aspect_ratio=payload.aspect_ratio,
+                priority=payload.priority,
+                settings=settings,
+                upscale=payload.upscale,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"id": task.id, "status": task.status, "task_type": task.task_type}
 
     @app.post("/storyboards/{storyboard_id}/submit")
     def submit_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):

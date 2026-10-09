@@ -58,7 +58,7 @@ def main() -> None:
             print(f"管理员已创建: {admin.username}")
         return
     if args.command == "worker":
-        worker = Worker(database.settings.worker_id)
+        worker = Worker(database.settings.worker_id, settings=database.settings)
         try:
             while True:
                 with database.session() as session:

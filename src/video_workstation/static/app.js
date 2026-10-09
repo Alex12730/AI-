@@ -35,3 +35,36 @@ document.addEventListener("submit", async (event) => {
     window.alert(error.message);
   }
 });
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest(".compose-form");
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector("button");
+  const original = button.textContent;
+  const data = new FormData(form);
+  const payload = {
+    asset_ids: data.getAll("asset_ids"),
+    subtitle_asset_id: data.get("subtitle_asset_id") || null,
+    aspect_ratio: data.get("aspect_ratio"),
+    priority: Number(data.get("priority")),
+    upscale: data.get("upscale") === "1",
+  };
+  button.disabled = true;
+  button.textContent = "正在入队…";
+  try {
+    const response = await fetch(`/api/projects/${form.dataset.project}/compose`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": data.get("csrf_token") || ""},
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "合成任务入队失败");
+    button.textContent = "已加入队列";
+    setTimeout(() => location.reload(), 500);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = original;
+    window.alert(error.message);
+  }
+});

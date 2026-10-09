@@ -171,6 +171,16 @@ def model_readiness(profile: ModelProfile) -> str:
     return "configured"
 
 
+def video2x_is_admitted(profile: ModelProfile, *, scale: int = 2) -> bool:
+    if profile.slug != "video2x" or not profile.enabled or model_readiness(profile) != "admitted":
+        return False
+    fingerprint = model_config_fingerprint(profile)
+    return any(
+        int(preset.get("scale", 0)) == scale and preset.get("config_fingerprint") == fingerprint
+        for preset in (profile.validated_presets_json or [])
+    )
+
+
 def record_benchmark(
     profile: ModelProfile,
     duration_seconds: float,
