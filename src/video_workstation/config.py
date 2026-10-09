@@ -20,6 +20,7 @@ class Settings:
         default_factory=lambda: os.getenv("VIDEO_WORKSTATION_SECURE_COOKIES", "0") == "1"
     )
     minimum_free_bytes: int = 100 * 1024**3
+    maximum_video_upload_bytes: int = 4 * 1024**3
     worker_id: str = field(default_factory=lambda: os.getenv("VIDEO_WORKSTATION_WORKER_ID", "gpu-worker-1"))
 
     def __post_init__(self) -> None:

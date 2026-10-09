@@ -16,6 +16,7 @@ class PermissionDenied(RuntimeError):
 
 SHOT_DURATION_PRESETS = (5, 10, 15, 20)
 SHOT_ASPECT_RATIOS = ("16:9", "9:16")
+SHOT_SCENE_TYPES = ("product_ui", "broll", "character", "series_drama")
 
 
 def _now() -> datetime:
@@ -143,6 +144,8 @@ def update_draft_shot(
     prompt: str,
     duration_seconds: float,
     aspect_ratio: str,
+    negative_prompt: str | None = None,
+    scene_type: str | None = None,
 ) -> Shot:
     assert_project_access(actor, shot.storyboard.project)
     if shot.storyboard.status != "draft":
@@ -151,9 +154,20 @@ def update_draft_shot(
         raise ValueError("时长只能选择 5、10、15、20 秒")
     if aspect_ratio not in SHOT_ASPECT_RATIOS:
         raise ValueError("画幅只能选择 16:9、9:16")
+    normalized_title = title.strip()
+    normalized_prompt = prompt.strip()
+    normalized_scene_type = scene_type or shot.scene_type
+    if not normalized_title:
+        raise ValueError("镜头标题不能为空")
+    if not normalized_prompt:
+        raise ValueError("正向提示词不能为空")
+    if normalized_scene_type not in SHOT_SCENE_TYPES:
+        raise ValueError("镜头类型不合法")
 
-    shot.title = title.strip()
-    shot.prompt = prompt.strip()
+    shot.title = normalized_title
+    shot.prompt = normalized_prompt
+    shot.negative_prompt = (negative_prompt if negative_prompt is not None else shot.negative_prompt).strip()
+    shot.scene_type = normalized_scene_type
     shot.duration_seconds = duration_seconds
     shot.aspect_ratio = aspect_ratio
     session.add(
@@ -162,7 +176,12 @@ def update_draft_shot(
             action="shot.update",
             entity_type="shot",
             entity_id=shot.id,
-            details_json={"duration_seconds": duration_seconds, "aspect_ratio": aspect_ratio},
+            details_json={
+                "duration_seconds": duration_seconds,
+                "aspect_ratio": aspect_ratio,
+                "scene_type": normalized_scene_type,
+                "negative_prompt_updated": negative_prompt is not None,
+            },
         )
     )
     return shot

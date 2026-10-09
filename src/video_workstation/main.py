@@ -3,11 +3,13 @@ from __future__ import annotations
 import secrets
 import hashlib
 import json
+import mimetypes
 from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -34,6 +36,7 @@ from .services.projects import (
     PermissionDenied,
     SHOT_ASPECT_RATIOS,
     SHOT_DURATION_PRESETS,
+    SHOT_SCENE_TYPES,
     approve_storyboard,
     assert_project_access,
     bulk_update_draft_shots,
@@ -48,6 +51,8 @@ from .services.projects import (
 )
 from .storage import InsufficientStorage, StorageGuard, generated_asset_path
 from .services.system_status import collect_system_status
+from .services.assets import store_uploaded_video
+from .media import InvalidRange, iter_file_range, parse_range_header, resolve_asset_path
 
 
 PACKAGE_DIR = Path(__file__).parent
@@ -77,6 +82,8 @@ class EnqueueRequest(BaseModel):
 class ShotUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=20_000)
+    negative_prompt: str = Field(default="", max_length=20_000)
+    scene_type: str | None = Field(default=None)
     duration_seconds: float = Field(gt=0, le=60)
     aspect_ratio: str = Field(pattern=r"^(16:9|9:16)$")
 
@@ -117,6 +124,7 @@ def serialize_project(project: Project) -> dict:
                 "sequence_no": shot.sequence_no,
                 "title": shot.title,
                 "prompt": shot.prompt,
+                "negative_prompt": shot.negative_prompt,
                 "scene_type": shot.scene_type,
                 "duration_seconds": shot.duration_seconds,
                 "aspect_ratio": shot.aspect_ratio,
@@ -353,6 +361,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for shot in storyboard.shots
         }
         tasks = list(session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.created_at.desc())))
+        tasks_by_id = {task.id: task for task in tasks}
+        profiles_by_id = {profile.id: profile for profile in profiles}
+        asset_views_by_shot: dict[str, list[dict]] = {}
+        video_assets = list(
+            session.scalars(
+                select(Asset)
+                .where(Asset.project_id == project.id, Asset.kind == "video")
+                .order_by(Asset.created_at.desc())
+            )
+        )
+        for asset in video_assets:
+            if asset.shot_id is None:
+                continue
+            task = tasks_by_id.get(asset.task_id) if asset.task_id else None
+            profile = profiles_by_id.get(task.model_profile_id) if task and task.model_profile_id else None
+            qc = asset.metadata_json.get("qc", {})
+            try:
+                resolve_asset_path(asset, settings)
+                available = True
+            except ValueError:
+                available = False
+            asset_views_by_shot.setdefault(asset.shot_id, []).append(
+                {
+                    "id": asset.id,
+                    "available": available,
+                    "source_label": "真实录屏" if asset.metadata_json.get("source") == "upload" else (profile.display_name if profile else "本地模型"),
+                    "duration_seconds": qc.get("duration_seconds"),
+                    "width": qc.get("width"),
+                    "height": qc.get("height"),
+                    "model_version": task.model_version_snapshot if task else "",
+                    "quantization": task.quantization_snapshot if task else "",
+                    "seed": task.payload_json.get("seed") if task else None,
+                    "created_at": asset.created_at,
+                }
+            )
         return templates.TemplateResponse(
             request,
             "project.html",
@@ -364,7 +407,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "available_profiles_by_shot": available_profiles_by_shot,
                 "duration_presets": SHOT_DURATION_PRESETS,
                 "aspect_ratios": SHOT_ASPECT_RATIOS,
+                "scene_types": SHOT_SCENE_TYPES,
                 "tasks": tasks,
+                "asset_views_by_shot": asset_views_by_shot,
                 "page": "projects",
                 "csrf_token": request.session["csrf"],
             },
@@ -376,6 +421,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         duration_seconds: float = Form(...),
         aspect_ratio: str = Form(...),
+        title: str | None = Form(None),
+        prompt: str | None = Form(None),
+        negative_prompt: str | None = Form(None),
+        scene_type: str | None = Form(None),
         csrf_token: str = Form(...),
         session: Session = Depends(session_dependency),
     ):
@@ -391,10 +440,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session,
                 user,
                 shot,
-                title=shot.title,
-                prompt=shot.prompt,
+                title=title if title is not None else shot.title,
+                prompt=prompt if prompt is not None else shot.prompt,
                 duration_seconds=duration_seconds,
                 aspect_ratio=aspect_ratio,
+                negative_prompt=negative_prompt,
+                scene_type=scene_type,
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -427,6 +478,86 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
+
+    @app.post("/shots/{shot_id}/assets/video")
+    def upload_shot_video(
+        shot_id: str,
+        request: Request,
+        video: UploadFile = File(...),
+        csrf_token: str = Form(...),
+        session: Session = Depends(session_dependency),
+    ):
+        user = html_user(request, session)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+        validate_csrf(request, csrf_token)
+        shot = session.get(Shot, shot_id)
+        if shot is None:
+            raise HTTPException(404, "镜头不存在")
+        if shot.storyboard.status != "approved":
+            raise HTTPException(409, "分镜审批后才能导入真实素材")
+        try:
+            store_uploaded_video(session, user, shot, video.filename or "upload.mp4", video.file, settings)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        finally:
+            video.file.close()
+        return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
+
+    @app.get("/assets/{asset_id}/content")
+    def asset_content(
+        asset_id: str,
+        request: Request,
+        download: bool = False,
+        user: User = Depends(current_user),
+        session: Session = Depends(session_dependency),
+    ):
+        asset = session.get(Asset, asset_id)
+        if asset is None:
+            raise HTTPException(404, "素材不存在")
+        project = session.get(Project, asset.project_id)
+        if project is None:
+            raise HTTPException(404, "项目不存在")
+        assert_project_access(user, project)
+        try:
+            path = resolve_asset_path(asset, settings)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+        file_size = path.stat().st_size
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        try:
+            byte_range = parse_range_header(request.headers.get("Range"), file_size)
+        except InvalidRange as exc:
+            raise HTTPException(
+                status_code=416,
+                detail=str(exc),
+                headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"},
+            ) from exc
+
+        if byte_range is None:
+            response = FileResponse(
+                path,
+                media_type=media_type,
+                filename=path.name if download else None,
+                content_disposition_type="attachment" if download else "inline",
+            )
+            response.headers["Accept-Ranges"] = "bytes"
+            return response
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {byte_range.start}-{byte_range.end}/{file_size}",
+            "Content-Length": str(byte_range.length),
+        }
+        if download:
+            headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(path.name)}"
+        return StreamingResponse(
+            iter_file_range(path, byte_range),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
 
     @app.post("/storyboards/{storyboard_id}/submit")
     def submit_form(storyboard_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
@@ -651,6 +782,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 prompt=payload.prompt,
                 duration_seconds=payload.duration_seconds,
                 aspect_ratio=payload.aspect_ratio,
+                negative_prompt=payload.negative_prompt,
+                scene_type=payload.scene_type,
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -658,6 +791,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "id": shot.id,
             "title": shot.title,
             "prompt": shot.prompt,
+            "negative_prompt": shot.negative_prompt,
+            "scene_type": shot.scene_type,
             "duration_seconds": shot.duration_seconds,
             "aspect_ratio": shot.aspect_ratio,
         }

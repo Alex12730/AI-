@@ -52,7 +52,7 @@ def parse_ffprobe(payload: dict[str, Any], *, expected_duration: float, require_
     )
 
 
-def probe_media(path: Path, *, expected_duration: float, ffprobe_bin: str = "ffprobe") -> QCResult:
+def probe_media(path: Path, *, expected_duration: float, require_audio: bool = True, ffprobe_bin: str = "ffprobe") -> QCResult:
     completed = subprocess.run(
         [
             ffprobe_bin,
@@ -76,4 +76,4 @@ def probe_media(path: Path, *, expected_duration: float, ffprobe_bin: str = "ffp
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError:
         return QCResult(passed=False, errors=["corrupt_file"])
-    return parse_ffprobe(payload, expected_duration=expected_duration)
+    return parse_ffprobe(payload, expected_duration=expected_duration, require_audio=require_audio)

@@ -118,7 +118,7 @@ def test_alembic_migrates_the_configured_non_default_database(tmp_path):
     database.migrate()
     assert custom.exists()
     with database.engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261009_0003"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261009_0004"
 
 
 def test_worker_status_is_unique_and_task_reference_is_cleared(tmp_path):

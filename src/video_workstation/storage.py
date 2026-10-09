@@ -27,7 +27,7 @@ class StorageGuard:
 
 
 SAFE_ID = re.compile(r"^[a-f0-9]{32}$")
-ALLOWED_SUFFIXES = {".mp4", ".wav", ".srt", ".json", ".png", ".jpg"}
+ALLOWED_SUFFIXES = {".mp4", ".mov", ".webm", ".wav", ".srt", ".json", ".png", ".jpg"}
 
 
 def generated_asset_path(root: Path, project_id: str, task_id: str, suffix: str) -> Path:

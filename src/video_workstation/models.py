@@ -167,6 +167,7 @@ class WorkerStatus(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
+    __table_args__ = (UniqueConstraint("task_id", "kind", name="uq_assets_task_kind"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

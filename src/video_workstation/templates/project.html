@@ -33,8 +33,12 @@
     <div class="shot-index">{{ '%02d'|format(shot.sequence_no) }}</div>
     <div class="shot-main"><div class="shot-title"><h3>{{ shot.title }}</h3><span class="badge badge-neutral">{{ shot.scene_type }}</span></div><p>{{ shot.prompt }}</p>
       {% if storyboard.status == 'draft' %}
-      <form class="shot-settings-form" method="post" action="/shots/{{ shot.id }}/settings">
+      <details class="shot-editor"><summary>编辑镜头内容与参数</summary><form class="shot-settings-form shot-settings-form-complete" method="post" action="/shots/{{ shot.id }}/settings">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>镜头标题<input name="title" value="{{ shot.title }}" maxlength="200" required></label>
+        <label class="wide">正向提示词<textarea name="prompt" maxlength="20000" required>{{ shot.prompt }}</textarea></label>
+        <label class="wide">负面提示词<textarea name="negative_prompt" maxlength="20000">{{ shot.negative_prompt }}</textarea></label>
+        <label>镜头类型<select name="scene_type">{% for scene_type in scene_types %}<option value="{{ scene_type }}"{% if shot.scene_type == scene_type %} selected{% endif %}>{{ {'product_ui':'真实界面','broll':'B-roll / 空镜','character':'人物表演','series_drama':'系列 / 短剧'}[scene_type] }}</option>{% endfor %}</select></label>
         <label>时长
           <select name="duration_seconds">{% for duration in duration_presets %}<option value="{{ duration }}"{% if shot.duration_seconds == duration %} selected{% endif %}>{{ duration }} 秒</option>{% endfor %}</select>
         </label>
@@ -42,11 +46,33 @@
           <select name="aspect_ratio">{% for ratio in aspect_ratios %}<option value="{{ ratio }}"{% if shot.aspect_ratio == ratio %} selected{% endif %}>{{ ratio }}</option>{% endfor %}</select>
         </label>
         <button class="button button-secondary" type="submit">保存镜头设置</button>
-      </form>
+      </form></details>
       {% else %}<small>{{ shot.duration_seconds|int }} 秒 · {{ shot.aspect_ratio }}</small>{% endif %}
+      {% set shot_assets = asset_views_by_shot.get(shot.id, []) %}
+      {% if shot_assets %}
+      <section class="asset-preview" aria-label="镜头 {{ shot.sequence_no }} 素材">
+        {% set current_asset = shot_assets[0] %}
+        <div class="asset-preview-heading"><strong>当前素材</strong><span class="badge badge-neutral">{{ current_asset.source_label }}</span></div>
+        {% if current_asset.available %}
+        <video controls preload="metadata" src="/assets/{{ current_asset.id }}/content">浏览器不支持视频播放。</video>
+        {% else %}<p class="alert alert-error">素材文件已缺失，请重新生成或上传。</p>{% endif %}
+        <div class="asset-meta">
+          {% if current_asset.width and current_asset.height %}<span>{{ current_asset.width }}×{{ current_asset.height }}</span>{% endif %}
+          {% if current_asset.duration_seconds %}<span>{{ '%.1f'|format(current_asset.duration_seconds) }} 秒</span>{% endif %}
+          {% if current_asset.model_version %}<span>版本 {{ current_asset.model_version }}</span>{% endif %}
+          {% if current_asset.quantization %}<span>{{ current_asset.quantization }}</span>{% endif %}
+          {% if current_asset.seed is not none %}<span>Seed {{ current_asset.seed }}</span>{% endif %}
+          {% if current_asset.available %}<a class="text-link" href="/assets/{{ current_asset.id }}/content?download=1">下载</a>{% endif %}
+        </div>
+        {% if shot_assets|length > 1 %}<details class="asset-history"><summary>查看历史素材（{{ shot_assets|length - 1 }}）</summary>
+          <div class="asset-history-list">{% for asset in shot_assets[1:] %}<div class="asset-history-item"><span>{{ asset.source_label }} · {{ asset.created_at.strftime('%Y-%m-%d %H:%M') }}</span>{% if asset.available %}<a class="text-link" href="/assets/{{ asset.id }}/content?download=1">下载</a>{% else %}<span class="muted">文件缺失</span>{% endif %}</div>{% endfor %}</div>
+        </details>{% endif %}
+      </section>
+      {% endif %}
     </div>
     <div class="shot-action">
       {% if storyboard.status == 'approved' %}
+      <details class="upload-inline"><summary>上传真实录屏</summary><form method="post" action="/shots/{{ shot.id }}/assets/video" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>本地视频<input type="file" name="video" accept="video/mp4,video/quicktime,video/webm" required></label><button class="button button-secondary" type="submit">导入素材</button><small>保存在本机项目目录，不调用生成模型。</small></form></details>
       {% set shot_profiles = available_profiles_by_shot.get(shot.id, []) %}
       {% if shot_profiles %}
       <form class="inline-form demo-enqueue" data-shot="{{ shot.id }}">

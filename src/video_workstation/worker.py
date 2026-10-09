@@ -12,6 +12,7 @@ from .offline import validate_offline_profile
 from .qc import probe_media
 from .queue import QueueService
 from .services.models import model_config_fingerprint
+from .services.assets import register_video_asset
 from .services.workers import touch_worker
 from .storage import InsufficientStorage, StorageGuard
 
@@ -99,6 +100,7 @@ class Worker:
                     touch_worker(session, self.worker_id, "idle")
                     session.commit()
                     return True
+                register_video_asset(session, task, result.output_path, qc)
                 result.metadata["qc"] = {"passed": True, "duration_seconds": qc.duration_seconds, "has_audio": qc.has_audio}
             queue.succeed(task, {"output_path": str(result.output_path), **result.metadata}, lease_token=lease_token)
         else:

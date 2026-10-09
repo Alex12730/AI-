@@ -43,11 +43,25 @@ def test_draft_shot_edit_member_creation_and_project_assignment(tmp_path):
     shot_id = project["shots"][0]["id"]
     edited = client.patch(
         f"/api/shots/{shot_id}",
-        json={"title": "片头空镜", "prompt": "清晨城市航拍", "duration_seconds": 10, "aspect_ratio": "9:16"},
+        json={"title": "片头空镜", "prompt": "清晨城市航拍", "negative_prompt": "水印", "scene_type": "series_drama", "duration_seconds": 10, "aspect_ratio": "9:16"},
     )
     assert edited.status_code == 200
     assert edited.json()["prompt"] == "清晨城市航拍"
     assert edited.json()["duration_seconds"] == 10
+    assert edited.json()["negative_prompt"] == "水印"
+    assert edited.json()["scene_type"] == "series_drama"
+
+    blank = client.patch(
+        f"/api/shots/{shot_id}",
+        json={"title": "   ", "prompt": "不应保存", "negative_prompt": "", "scene_type": "broll", "duration_seconds": 10, "aspect_ratio": "9:16"},
+    )
+    assert blank.status_code == 409
+
+    invalid_scene = client.patch(
+        f"/api/shots/{shot_id}",
+        json={"title": "错误类型", "prompt": "不应保存", "negative_prompt": "", "scene_type": "unknown", "duration_seconds": 10, "aspect_ratio": "9:16"},
+    )
+    assert invalid_scene.status_code in {409, 422}
 
     invalid = client.patch(
         f"/api/shots/{shot_id}",
@@ -186,6 +200,38 @@ def test_project_page_edits_withdraws_and_matches_saved_shot_presets(tmp_path):
     no_match_page = client.get(f"/projects/{project['id']}")
     assert "暂无已验证模型" in no_match_page.text
     assert 'name="model_slug"' not in no_match_page.text
+
+
+def test_project_page_previews_assets_without_exposing_local_paths(tmp_path):
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    project = client.post(
+        "/api/projects",
+        json={"name": "素材预览", "source_script": "环境空镜。"},
+    ).json()
+    media = app.state.settings.asset_dir / project["id"] / "shot.mp4"
+    media.parent.mkdir(parents=True, exist_ok=True)
+    media.write_bytes(b"preview")
+    with app.state.database.session() as session:
+        asset = Asset(
+            project_id=project["id"],
+            shot_id=project["shots"][0]["id"],
+            kind="video",
+            path=str(media),
+            sha256="abc",
+            metadata_json={"source": "upload", "qc": {"duration_seconds": 5, "width": 1920, "height": 1080}},
+        )
+        session.add(asset)
+        session.flush()
+        asset_id = asset.id
+
+    page = client.get(f"/projects/{project['id']}")
+    assert page.status_code == 200
+    assert f'src="/assets/{asset_id}/content"' in page.text
+    assert f'href="/assets/{asset_id}/content?download=1"' in page.text
+    assert "真实录屏" in page.text
+    assert "1920×1080" in page.text
+    assert str(media) not in page.text
 
 
 def test_draft_page_bulk_updates_all_shots_then_allows_single_override(tmp_path):
