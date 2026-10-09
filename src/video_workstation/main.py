@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -235,6 +235,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "mode": "local-only"}
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        return Response(status_code=204)
+
     @app.get("/setup", response_class=HTMLResponse)
     def setup_page(request: Request, session: Session = Depends(session_dependency)):
         require_loopback(request)
@@ -279,6 +283,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         request.session["user_id"] = admin.id
         request.session["csrf"] = secrets.token_urlsafe(24)
+        session.commit()
         response = RedirectResponse("/", status_code=303)
         response.headers["X-CSRF-Token"] = request.session["csrf"]
         return response
@@ -354,6 +359,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         validate_csrf(request, csrf_token)
         project = create_project(session, user, name, source_script)
+        session.commit()
         return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
     @app.get("/projects/{project_id}", response_class=HTMLResponse)
@@ -507,6 +513,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        session.commit()
         return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
 
     @app.post("/projects/{project_id}/subtitles")
@@ -530,6 +537,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             store_subtitle_asset(session, project, user, subtitle.filename or "", content, settings)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        session.commit()
         return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/shot-settings")
@@ -558,6 +566,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        session.commit()
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.post("/shots/{shot_id}/assets/video")
@@ -583,6 +592,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         finally:
             video.file.close()
+        session.commit()
         return RedirectResponse(f"/projects/{shot.storyboard.project_id}", status_code=303)
 
     @app.get("/assets/{asset_id}/content")
@@ -676,6 +686,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if storyboard is None:
             raise HTTPException(404, "分镜不存在")
         submit_storyboard(session, user, storyboard)
+        session.commit()
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/approve")
@@ -688,6 +699,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if storyboard is None:
             raise HTTPException(404, "分镜不存在")
         approve_storyboard(session, user, storyboard)
+        session.commit()
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.post("/storyboards/{storyboard_id}/withdraw")
@@ -703,6 +715,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             withdraw_storyboard(session, user, storyboard)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        session.commit()
         return RedirectResponse(f"/projects/{storyboard.project_id}", status_code=303)
 
     @app.get("/queue", response_class=HTMLResponse)
