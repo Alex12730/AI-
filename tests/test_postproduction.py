@@ -46,8 +46,8 @@ def test_compose_and_encode_reject_empty_or_invalid_aspect(tmp_path):
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg runtime unavailable")
 def test_ffmpeg_compose_integration_preserves_delivery_contract(tmp_path):
-    first = tmp_path / "first.mp4"
-    second = tmp_path / "second.mp4"
+    first = tmp_path / "中文 first.mp4"
+    second = tmp_path / "中文 second.mp4"
     output = tmp_path / "delivery.mp4"
     commands = [
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=24:d=0.5", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(first)],
