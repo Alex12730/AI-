@@ -68,6 +68,8 @@ def probe_media(path: Path, *, expected_duration: float, require_audio: bool = T
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     if completed.returncode != 0:

@@ -167,3 +167,7 @@ $env:PYTHONPATH = "src"
 ## 许可证提醒
 
 应用代码的项目许可证尚未由项目所有者指定。第三方模型各自遵循其许可证。MiniMax H3 是开放权重但不是 Apache/MIT；部署时必须重新读取权重目录中的 LICENSE，并遵循界面归属、AI 生成标识、收入阈值与地域限制。仓库中的 [NOTICE](NOTICE.md) 仅是运维提醒，不是法律意见。
+
+## 本机 ComfyUI 三模型接入
+
+Wan 2.2、LTX-2.3、MiniMax H3 可通过固定本地调用脚本接入现有适配器。部署、启动和验收步骤见 [本地三模型部署说明](docs/operations/comfy-local-models.md)。模型权重放在仓库外，生产档位继续遵守十次基准准入规则。

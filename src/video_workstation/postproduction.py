@@ -110,7 +110,7 @@ def _probe_inputs(paths: list[Path], *, run: Callable = subprocess.run, ffprobe_
     for path in paths:
         completed = run(
             [ffprobe_bin, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
-            shell=False, check=False, capture_output=True, text=True, timeout=60,
+            shell=False, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         if completed.returncode != 0:
             raise ValueError("输入素材无法读取")
@@ -145,7 +145,7 @@ def execute_compose(
         resolved = replace(request, input_durations=durations, input_has_audio=has_audio)
         argv = build_compose_argv(resolved, ffmpeg_bin=ffmpeg_bin)
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
-        completed = run(argv, shell=False, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+        completed = run(argv, shell=False, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_seconds)
         if completed.returncode != 0 or not request.output_path.is_file():
             request.output_path.unlink(missing_ok=True)
             return AdapterResult(False, request.output_path, argv=argv, error_class="infrastructure", error_message="本地 FFmpeg 合成失败")
