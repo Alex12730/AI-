@@ -51,6 +51,8 @@ class Worker:
         task_id = task.id
         touch_worker(session, self.worker_id, "running", current_task_id=task.id)
         session.commit()
+        if task.task_type == "write_script":
+            return self._run_writer(session, task_id, lease_token)
         if task.task_type == "compose_project":
             return self._run_compose(session, task_id, lease_token)
         if task.task_type == "upscale":
@@ -124,6 +126,56 @@ class Worker:
         else:
             queue.fail(task, error_class=result.error_class or "infrastructure", message=result.error_message or "未知错误", lease_token=lease_token)
         touch_worker(session, self.worker_id, "idle")
+        session.commit()
+        return True
+
+    def _run_writer(self, session: Session, task_id: str, lease_token: str | None) -> bool:
+        from .adapters.local_writer import LocalWriter,LocalWriterError
+        from .models import WritingRevision
+        from .services.writing import store_writing_candidate,WritingConflict,writer_is_ready
+        from .writer_deployment import file_sha256
+        from .writing_contracts import WritingBody,WritingRequest
+        task=session.get(Task,task_id)
+        try:
+            existing=session.scalar(select(WritingRevision).where(WritingRevision.task_id==task.id))
+            if existing is None:
+                profile=session.get(ModelProfile,task.model_profile_id)
+                if not writer_is_ready(profile) or task.model_config_fingerprint!=model_config_fingerprint(profile):
+                    raise LocalWriterError('本地写作配置已改变，请重新检查写作能力')
+                runtime=task.runtime_config_snapshot
+                manifest_path=Path(runtime['writer_manifest'])
+                if not manifest_path.is_file() or file_sha256(manifest_path)!=runtime['manifest_sha256']:
+                    raise LocalWriterError('本地写作部署清单已改变，请重新验证')
+                request=WritingRequest.model_validate(task.payload_json['request'])
+                root=self.settings.data_dir if self.settings else Path('data').resolve()
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future=executor.submit(LocalWriter(manifest_path).generate,request,work_dir=root/'writing-jobs'/task.id)
+                    while True:
+                        try:
+                            body=future.result(timeout=self.heartbeat_seconds)
+                            break
+                        except FutureTimeout:
+                            session.refresh(task)
+                            QueueService(session).heartbeat(task,self.worker_id,lease_token,lease_seconds=self.lease_seconds)
+                            touch_worker(session,self.worker_id,'running',current_task_id=task.id)
+                            session.commit()
+                session.refresh(profile)
+                if not writer_is_ready(profile) or task.model_config_fingerprint!=model_config_fingerprint(profile):
+                    raise LocalWriterError('生成期间写作配置已改变，候选未写入，请重新验证')
+                existing=store_writing_candidate(session,task,body,lease_token=lease_token)
+            else:
+                WritingBody.model_validate(existing.body_json)
+                session.refresh(task)
+            QueueService(session).succeed(task,{'revision_id':existing.id,'version':existing.version},lease_token=lease_token)
+        except WritingConflict:
+            session.rollback()
+        except Exception as exc:
+            session.rollback()
+            task=session.get(Task,task_id);session.refresh(task)
+            if task.status=='running' and task.lease_token==lease_token:
+                QueueService(session).fail(task,error_class='configuration',
+                    message=str(exc) if isinstance(exc,LocalWriterError) else '本地写作任务失败；原有文案已保留',lease_token=lease_token)
+        touch_worker(session,self.worker_id,'idle')
         session.commit()
         return True
 
