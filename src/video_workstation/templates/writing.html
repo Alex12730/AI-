@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}文案工作室 · {{ document.project.name }}{% endblock %}
+{% block content %}
+<div data-writing-page data-status-url="/writing/{{ document.id }}/status" data-latest="{{ document.latest_version }}" data-has-selection="{{ 'yes' if selected else 'no' }}">
+<header class="page-header"><div><h1>把想法写成文案</h1><p>{{ recipe.name }} · {{ document.target_seconds }} 秒 · {{ '横屏' if document.aspect_ratio=='16:9' else '竖屏' }} · 每一步由你确认</p></div><a href="/works" class="text-link">我的作品</a></header>
+<p class="writing-idea"><strong>最初的想法</strong><span>{{ document.idea }}</span></p>
+{% if error %}<div class="creation-notice is-error" role="alert"><p>{{ error }}</p><p>你的输入保留在下方。检查版本后可另存一版。</p></div>{% endif %}
+<div class="creation-notice" data-writing-updates role="status" aria-live="polite" hidden><p></p><button class="button button-secondary" type="button" data-writing-reload>查看最新候选与状态</button></div>
+{% for task in tasks if task.status in ['queued','running','terminal_failed'] %}<p class="creation-note">{{ '正在本机生成文案，可以继续编辑已选版本。' if task.status=='running' else ('等待前面的任务完成后生成文案。' if task.status=='queued' else '生成未完成：' ~ (task.error_message or '请检查本地写作能力后重试')) }}</p>{% endfor %}
+{% if not selected %}<section class="writing-empty"><h2>先生成一版，看看方向</h2><p>结果会显示在候选区。选择“使用这版”后即可修改正文和分镜建议。</p></section>{% endif %}
+{% if selected %}
+<section aria-labelledby="editor-heading"><h2 id="editor-heading">我的编辑稿 <small>版本 {{ selected.version }}</small></h2>
+<form action="/writing/{{ document.id }}/save" method="post" class="creation-form writing-editor" data-writing-editor data-retained="{{ 'yes' if values else 'no' }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_latest" value="{{ document.latest_version }}"><input type="hidden" name="source_version" value="{{ values.source_version|default(selected.version) }}">
+  <label class="wide">标题<input name="title" maxlength="160" required value="{{ values.title|default(body.title) }}"></label>
+  <label class="wide">概要<textarea name="summary" rows="2" required maxlength="2000">{{ values.summary|default(body.summary) }}</textarea></label>
+  <label class="wide">完整文案<textarea name="script" rows="12" required maxlength="20000">{{ values.script|default(body.script) }}</textarea><small>改正文不会自动改写每段镜头。可展开分镜同步修改，或保存后让工作台按要求重新安排。</small></label>
+  <details class="wide"><summary>检查和修改 {{ body.shots|length }} 段分镜建议</summary><ol class="creation-shots">{% for shot in body.shots %}{% set i=loop.index0 %}<li class="creation-shot writing-shot-fields">
+    <label>第 {{ loop.index }} 段标题<input name="shot_{{ i }}_title" maxlength="200" required value="{{ values.get('shot_' ~ i ~ '_title',shot.title) }}"></label>
+    <label>画面描述<textarea name="shot_{{ i }}_visual" rows="3" maxlength="2000" required>{{ values.get('shot_' ~ i ~ '_visual',shot.visual) }}</textarea></label>
+    <label>这一段的旁白<textarea name="shot_{{ i }}_narration" rows="2" maxlength="2000">{{ values.get('shot_' ~ i ~ '_narration',shot.narration) }}</textarea></label>
+  </li>{% endfor %}</ol></details>
+  <div class="wide creation-actions"><button class="button button-primary">保存我的修改</button><span data-writing-dirty aria-live="polite">{{ '有未保存的内容' if values else '当前版本已保存' }}</span></div>
+</form>
+<form action="/writing/{{ document.id }}/publish" method="post" data-requires-saved class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="version" value="{{ selected.version }}"><button class="button button-secondary">确认文案，查看分镜</button><span>只进入分镜检查，不会立即生成视频。</span></form>
+</section>
+{% endif %}
+<section class="writing-rewrite" aria-labelledby="rewrite-heading"><h2 id="rewrite-heading">{{ '换一种写法' if selected else '生成文案' }}</h2>
+{% if not writer_ready %}<p class="creation-issue">本地写作模型尚未准备好。已保存的版本不会受影响。</p>{% endif %}
+<form action="/writing/{{ document.id }}/generate" method="post" data-requires-saved class="writing-rewrite-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_latest" value="{{ document.latest_version }}"><input type="hidden" name="expected_selected" value="{{ document.selected_version or 0 }}"><input type="hidden" name="request_key" value="{{ request_key }}">
+  <div class="writing-options"><button class="button button-secondary" name="operation" value="generate" {% if not writer_ready %}disabled{% endif %}>{{ '另写一版' if selected else '根据想法生成' }}</button>
+  {% if selected %}{% for op,label in [('shorter','更简短'),('conversational','更口语'),('ending','改结尾')] %}<button class="button button-secondary" name="operation" value="{{ op }}" {% if not writer_ready %}disabled{% endif %}>{{ label }}</button>{% endfor %}{% endif %}</div>
+  {% if selected %}<label>具体想怎样修改？<textarea name="instruction" rows="2" maxlength="2000" placeholder="例如：保留开场，改成小女孩把萤火虫放回森林的结尾，同步调整分镜旁白。"></textarea></label><button class="button button-secondary" name="operation" value="custom" {% if not writer_ready %}disabled{% endif %}>按我的要求改写</button>{% endif %}
+  <p class="creation-note">新结果只添加候选，不会替换编辑稿。文案时长为创作目标，精确时长需在配音阶段核对。</p>
+  <p class="creation-note">生成内容需要你确认；知识、价格和产品功能请核对事实，模型可能写错。</p>
+</form></section>
+{% if candidates %}<section class="writing-candidates"><h2>候选文案</h2>{% for revision in candidates %}<article class="writing-candidate"><h3>版本 {{ revision.version }} · {{ '改写结果' if revision.kind=='rewrite' else '生成结果' }}{% if revision.parent_version %} · 基于版本 {{ revision.parent_version }}{% endif %}</h3><h4>{{ revision.body_json.title }}</h4><p class="creation-note">{{ revision.body_json.summary }}</p><div class="writing-prose">{{ revision.body_json.script }}</div>
+<details><summary>查看这版的分镜建议</summary><ol>{% for shot in revision.body_json.shots %}<li><strong>{{ shot.title }}</strong><p>{{ shot.visual }}</p><p class="creation-note">旁白：{{ shot.narration or '无' }}</p></li>{% endfor %}</ol></details>
+<form method="post" action="/writing/{{ document.id }}/select" data-requires-saved class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_latest" value="{{ document.latest_version }}"><input type="hidden" name="version" value="{{ revision.version }}"><button class="button button-secondary">使用这版，继续修改</button></form></article>{% endfor %}</section>{% endif %}
+{% if versions %}<details class="creation-advanced"><summary>历史版本（{{ versions|length }}）</summary><form method="post" action="/writing/{{ document.id }}/select" data-requires-saved class="creation-upload"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_latest" value="{{ document.latest_version }}"><label>选择已保存的版本<select name="version">{% for version in versions %}<option value="{{ version.version }}" {% if selected and selected.version==version.version %}selected{% endif %}>版本 {{ version.version }} · {{ {'manual':'我的修改','generated':'生成','rewrite':'改写'}[version.kind] }} · {{ version.created_at.strftime('%m-%d %H:%M') }}</option>{% endfor %}</select></label><button class="button button-secondary">打开该版本</button></form><p class="creation-note">打开旧版本后保存修改，会另存新版本，历史内容始终保留。</p></details>{% endif %}
+</div>
+<script src="{{ url_for('static',path='writing.js') }}" defer></script>
+{% endblock %}

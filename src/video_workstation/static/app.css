@@ -48,6 +48,19 @@
 .creation-actions span { color: var(--muted); }
 .creation-delivery { padding: 1.5rem; }
 .creation-advanced { margin-top: 2rem; }
+.writing-idea { display: grid; gap: .5rem; max-width: 75ch; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+.writing-idea span, .writing-prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; max-width: 75ch; }
+.writing-editor { padding: 1.25rem; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.writing-rewrite, .writing-candidates { margin-top: 2.5rem; }
+.writing-options { display: flex; gap: .7rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.writing-rewrite-form { display: grid; gap: 1rem; justify-items: start; }
+.writing-rewrite-form label { display: grid; gap: .5rem; width: 100%; max-width: 75ch; }
+.writing-candidate { padding: 1.5rem 0; border-bottom: 1px solid var(--line); }
+.writing-candidate h4 { margin: 1rem 0 .5rem; font-size: 1.2rem; }
+.writing-shot-fields { display: grid; gap: 1rem; }
+.writing-work { padding: 1.25rem; }
+.writing-work h2 { margin-top: 0; }
+.writing-work li { padding: .4rem 0; }
 .nav-settings { color: #e7e4dc; }
 .nav-settings > summary { padding: .75rem; }
 @media (max-width: 650px) {

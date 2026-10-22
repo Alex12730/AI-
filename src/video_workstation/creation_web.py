@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .models import Asset, CreationPlan, Shot, Task
+from .models import Asset, CreationPlan, Shot, Task, ModelProfile, WritingDocument
 from .services.assets import store_uploaded_video
 from .services.creation import (RECIPES, assert_plan_owner, create_guided_project,
     creation_choices, set_creation_paused, start_creation, valid_bound_asset)
@@ -53,7 +53,9 @@ def register_creation_routes(app, *, settings, templates, session_dependency, ht
         actor = html_user(request, session)
         if actor is None:
             return RedirectResponse("/login", 303)
-        return templates.TemplateResponse(request, "create.html", {"user": actor, "recipes": RECIPES,
+        from .services.writing import writer_is_ready
+        profile=session.scalar(select(ModelProfile).where(ModelProfile.slug=='qwen-local'))
+        return templates.TemplateResponse(request, "create.html", {"user": actor, "recipes": RECIPES,"writer_ready":writer_is_ready(profile),
             "page": "create", "csrf_token": request.session["csrf"], "values": {}, "error": ""})
 
     @app.post("/create")
@@ -197,5 +199,9 @@ def register_creation_routes(app, *, settings, templates, session_dependency, ht
         if actor is None:
             return RedirectResponse("/login", 303)
         plans = list(session.scalars(select(CreationPlan).where(CreationPlan.created_by_id == actor.id).order_by(CreationPlan.created_at.desc())))
-        return templates.TemplateResponse(request, "works.html", {"user": actor, "plans": plans,
+        documents=list(session.scalars(select(WritingDocument).where(WritingDocument.created_by_id==actor.id).order_by(WritingDocument.created_at.desc())))
+        groups={d.project_id:{'project':d.project,'document':d,'plans':[]} for d in documents}
+        for plan in plans:
+            groups.setdefault(plan.project_id,{'project':plan.project,'document':None,'plans':[]})['plans'].append(plan)
+        return templates.TemplateResponse(request, "works.html", {"user": actor, "plans": plans,"groups":list(groups.values()),
             "state_labels": STATE_LABELS, "page": "works", "csrf_token": request.session["csrf"]})

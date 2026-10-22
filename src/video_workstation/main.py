@@ -749,7 +749,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_admin(user)
         profiles = list(session.scalars(select(ModelProfile).order_by(ModelProfile.display_name)))
         readiness_by_slug = {profile.slug: model_readiness(profile) for profile in profiles}
-        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "readiness_by_slug": readiness_by_slug, "page": "models", "csrf_token": request.session["csrf"]})
+        from .services.writing import writer_is_ready
+        writer_ready=writer_is_ready(next((p for p in profiles if p.slug=='qwen-local'),None))
+        return templates.TemplateResponse(request, "models.html", {"user": user, "profiles": profiles, "readiness_by_slug": readiness_by_slug, "writer_ready":writer_ready,"page": "models", "csrf_token": request.session["csrf"]})
 
     def refresh_system_status(request: Request, session: Session):
         system_status = collect_system_status(session, settings)
@@ -1173,6 +1175,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .creation_web import register_creation_routes
     register_creation_routes(app, settings=settings, templates=templates,
         session_dependency=session_dependency, html_user=html_user, validate_csrf=validate_csrf)
+    from .writing_web import register_writing_routes
+    register_writing_routes(app,templates=templates,session_dependency=session_dependency,
+        html_user=html_user,validate_csrf=validate_csrf)
     return app
 
 

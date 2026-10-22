@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block title %}我的作品 · 本地视频工作台{% endblock %}
 {% block content %}
-<header class="page-header"><div><h1>我的作品</h1><p>继续制作、查看进度或保存已完成的视频。</p></div><a class="button button-primary" href="/create">开始制作</a></header>
-{% if plans %}<section class="panel"><div class="table-wrap"><table><thead><tr><th>作品</th><th>阶段</th><th>时长</th><th>操作</th></tr></thead><tbody>{% for plan in plans %}<tr><td>{{ plan.project.name }}</td><td>{{ state_labels.get(plan.status, plan.status) }}</td><td>{{ plan.target_seconds }} 秒</td><td><a class="text-link" href="/creations/{{ plan.id }}">继续查看</a></td></tr>{% endfor %}</tbody></table></div></section>{% else %}<section class="empty-state"><h2>从第一个视频开始</h2><p>准备一段描述或本地视频，下一步会帮你安排镜头。</p><a class="button button-primary" href="/create">安排第一个视频</a></section>{% endif %}
+<header class="page-header"><div><h1>我的作品</h1><p>从文案继续修改，或查看各版分镜和成片。</p></div><a class="button button-primary" href="/create">开始制作</a></header>
+{% if groups %}{% for group in groups %}<section class="panel writing-work"><h2>{{ group.project.name }}</h2>
+{% if group.document %}<p><a class="text-link" href="/writing/{{ group.document.id }}">继续编辑文案</a> · {{ group.document.latest_version }} 个已保存版本</p>{% endif %}
+{% if group.plans %}<ul>{% for plan in group.plans %}<li><a class="text-link" href="/creations/{{ plan.id }}">分镜版本 {{ plan.storyboard.version }}</a> · {{ state_labels.get(plan.status,plan.status) }} · {{ plan.target_seconds }} 秒</li>{% endfor %}</ul>{% else %}<p class="creation-note">先完成并确认文案，再安排镜头。</p>{% endif %}</section>{% endfor %}
+{% else %}<section class="empty-state"><h2>从第一个想法开始</h2><p>输入一句话，让工作台先帮你写一版。</p><a class="button button-primary" href="/create">开始第一个作品</a></section>{% endif %}
 <p><a class="text-link" href="/">查看原有项目与管理工作台</a></p>
 {% endblock %}

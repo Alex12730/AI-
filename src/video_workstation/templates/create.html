@@ -1,18 +1,29 @@
 {% extends "base.html" %}
 {% block title %}开始制作 · 本地视频工作台{% endblock %}
 {% block content %}
-<header class="page-header"><div><h1>你想做一个什么视频？</h1><p>先安排内容，再确认镜头。填写这一步不会启动模型。</p></div></header>
-<ol class="creation-steps" aria-label="制作步骤"><li aria-current="step">1 说明内容</li><li>2 确认分镜</li><li>3 自动制作</li><li>4 预览和保存</li></ol>
+<header class="page-header"><div><h1>从一句话，开始你的作品</h1><p>在这里生成文案、保存修改，再确认分镜。生成文案不会启动视频制作。</p></div></header>
 {% if error %}<div class="creation-notice is-error" role="alert"><strong>请调整后再继续</strong><p>{{ error }}</p></div>{% endif %}
+<section class="panel"><div class="panel-heading"><h2>让工作台帮我写</h2></div><form action="/writing" method="post" class="creation-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label class="wide">你想做一个什么视频？<textarea name="idea" rows="4" maxlength="4000" required placeholder="例如：小女孩在森林寻找萤火虫的温暖故事，结尾有一点惊喜。">{{ values.idea|default('') }}</textarea></label>
+  <label>视频类型<select name="recipe" data-recipe-select>{% for key,item in recipes.items() %}<option value="{{ key }}" data-hint="{{ item.hint }}" {% if values.recipe|default('story')==key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><small data-recipe-hint>{{ recipes[values.recipe if values.recipe in recipes else 'story'].hint }}</small></label>
+  <label>整片时长（秒）<input type="number" name="target_seconds" min="5" max="180" step="5" required value="{{ values.target_seconds|default(30) }}"><small>目前按每段 5 秒安排分镜。</small></label>
+  <label>画面方向<select name="aspect_ratio"><option value="16:9" {% if values.aspect_ratio|default('16:9')=='16:9' %}selected{% endif %}>横屏 · 电脑 / 课程</option><option value="9:16" {% if values.aspect_ratio=='9:16' %}selected{% endif %}>竖屏 · 手机短视频</option></select></label>
+  <p class="creation-note">先生成候选文案，由你修改确认。角色图、独立配音与录音导入尚未接通。</p>
+  {% if not writer_ready %}<p class="wide creation-issue">本地写作模型尚未准备好。可以先保存想法，或使用下方“我已有完整文案”。</p>{% endif %}
+  <div class="wide creation-actions"><button name="intent" value="generate" class="button button-primary" {% if not writer_ready %}disabled{% endif %}>生成文案</button><button name="intent" value="save" class="button button-secondary">先保存想法</button></div>
+</form></section>
+<details class="creation-advanced" {% if error and not values.idea %}open{% endif %}><summary>我已有完整文案</summary><p class="creation-note">用现有文案直接建立模板分镜，不调用写作模型。</p>
 <section class="panel creation-intro"><form action="/create" method="post" class="creation-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>作品名称<input name="name" maxlength="160" required value="{{ values.name|default('') }}" placeholder="例如：森林中的一天"></label>
-  <label>视频类型<select name="recipe">{% for key, item in recipes.items() %}<option value="{{ key }}" {% if values.recipe|default('story') == key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <label>视频类型<select name="recipe" data-recipe-select>{% for key, item in recipes.items() %}<option value="{{ key }}" data-hint="{{ item.hint }}" {% if values.recipe|default('story') == key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><small data-recipe-hint>{{ recipes[values.recipe if values.recipe in recipes else 'story'].hint }}</small></label>
   <label class="wide">视频内容或现成文案<textarea name="script" rows="6" required maxlength="20000" placeholder="例如：清晨的森林，薄雾散去，阳光照进林间。想要安静、自然的画面。">{{ values.script|default('') }}</textarea><small>当前使用内置模板安排分镜。按句号或换行拆段，镜头不足时补充场景；请在下一步检查内容。</small></label>
   <label>整片时长（秒）<input type="number" name="target_seconds" min="5" max="180" step="5" required value="{{ values.target_seconds|default(30) }}"><small>默认 30 秒。每段 5 秒，可填 5–180 秒的 5 的倍数。</small></label>
   <label>画面方向<select name="aspect_ratio"><option value="16:9" {% if values.aspect_ratio|default('16:9') == '16:9' %}selected{% endif %}>横屏 · 电脑 / 课程</option><option value="9:16" {% if values.aspect_ratio == '9:16' %}selected{% endif %}>竖屏 · 手机短视频</option></select></label>
-  <p class="wide creation-note">声音：保留导入视频或模型的原声，默认不加音乐。当前没有自动配音或字幕识别；精确口播请使用自己的录制视频。</p>
+  <p class="wide creation-note">声音：保留视频原声。独立录音导入、自动配音和字幕识别尚未接通。</p>
   <div class="wide"><button class="button button-primary" type="submit">下一步：安排分镜</button></div>
 </form></section>
-<section class="creation-help" aria-labelledby="recipe-help"><h2 id="recipe-help">选哪种流程？</h2><dl>{% for key, item in recipes.items() %}<div><dt>{{ item.name }}</dt><dd>{{ item.hint }}</dd></div>{% endfor %}</dl></section>
+</details>
+<script src="{{ url_for('static',path='writing.js') }}" defer></script>
 {% endblock %}

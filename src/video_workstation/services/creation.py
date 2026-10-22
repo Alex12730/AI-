@@ -26,7 +26,7 @@ from .projects import PermissionDenied, create_project
 RECIPES = {
     "product": {"name": "产品介绍 / 软件教程", "hint": "用真实录屏展示操作与功能。", "scene": "product_ui",
         "beats": ("展示产品或软件的真实全貌", "展示第一步操作", "展示关键功能", "展示操作结果", "回顾使用方法", "展示下一步行动")},
-    "knowledge": {"name": "知识讲解", "hint": "讲稿搭配已有画面或生成的环境镜头；配音请先自行录制。", "scene": "broll",
+    "knowledge": {"name": "知识讲解", "hint": "讲稿搭配已有画面或环境镜头；当前可保留视频原声，独立配音尚待接通。", "scene": "broll",
         "beats": ("提出主题", "交代背景", "解释第一个要点", "解释第二个要点", "展示应用情境", "回顾主题")},
     "talking": {"name": "真人口播剪辑", "hint": "导入自己拍摄的视频，保留原声。", "scene": "product_ui",
         "beats": ("开场介绍", "说明观点", "补充解释", "展示案例", "回顾重点", "结束语")},
