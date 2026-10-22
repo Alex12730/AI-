@@ -23,7 +23,10 @@ def writing_db(tmp_path):
         s.add_all([owner,outsider]);seed_model_profiles(s);s.flush()
         p=s.scalar(select(ModelProfile).where(ModelProfile.slug=="qwen-local"))
         p.enabled=True;p.model_version="writer-test";p.quantization="Q4_K_M"
-        p.runtime_config_json={"writer_manifest":"test.json","manifest_sha256":"a"*64}
+        from test_local_writer import deployment
+        from video_workstation.writer_deployment import file_sha256
+        manifest=deployment(tmp_path)
+        p.runtime_config_json={"writer_manifest":str(manifest),"manifest_sha256":file_sha256(manifest)}
         p.capabilities_json={"text_ready":True,"text_ready_fingerprint":model_config_fingerprint(p)}
     return db,owner.id,outsider.id
 
@@ -110,3 +113,15 @@ def test_real_interface_constraints_survive_generated_scene_type(writing_db):
         save_writing_revision(s,actor,doc,WritingBody(**data),expected_latest=0)
         plan=publish_writing_revision(s,actor,doc,1)
         assert sorted(plan.storyboard.shots,key=lambda v:v.sequence_no)[0].scene_type=="product_ui"
+
+
+def test_removed_writer_package_is_not_shown_as_ready(writing_db):
+    from pathlib import Path
+    from video_workstation.services.writing import writer_is_ready
+    db,owner,_=writing_db
+    with db.session() as s:
+        profile=s.scalar(select(ModelProfile).where(ModelProfile.slug=='qwen-local'))
+        assert writer_is_ready(profile)
+        manifest=Path(profile.runtime_config_json['writer_manifest'])
+        (manifest.parent/'model.gguf').unlink()
+        assert not writer_is_ready(profile)

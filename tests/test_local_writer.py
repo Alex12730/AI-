@@ -12,7 +12,7 @@ from test_writing_contracts import body_data, request_data
 
 
 def deployment(tmp_path):
-    engine=tmp_path/'engine';engine.mkdir(exist_ok=True)
+    engine=tmp_path/'engine';engine.mkdir(parents=True,exist_ok=True)
     exe=engine/'llama-server.exe';exe.write_bytes(b'MZ-test-engine')
     model=tmp_path/'model.gguf';model.write_bytes(b'GGUF-test-model')
     license=tmp_path/'LICENSE';license.write_text('test license')
@@ -57,7 +57,8 @@ def writer_server(tmp_path,monkeypatch):
         def do_GET(self):
             self.send_response(200);self.end_headers();self.wfile.write(b'{"status":"ok"}')
         def do_POST(self):
-            observed.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+            observed.append({**json.loads(self.rfile.read(int(self.headers['Content-Length']))),
+                '_auth_header':self.headers.get('Authorization')})
             payload=json.dumps({'choices':[{'finish_reason':replies['finish_reason'],
                 'message':{'content':replies['content']}}]},ensure_ascii=False).encode('utf-8')
             self.send_response(replies['status'])
@@ -84,9 +85,15 @@ def test_writer_uses_local_schema_and_cleans_own_process(writer_server,tmp_path)
     assert body.title=='森林里的萤火虫'
     assert observed[0]['chat_template_kwargs']=={'enable_thinking':False}
     assert observed[0]['response_format']['type']=='json_schema'
+    schema=observed[0]['response_format']['json_schema']['schema']
+    assert schema['required']==['schema_version','title','summary','script','characters','shots']
+    assert schema['properties']['shots']['minItems']==6
+    assert schema['properties']['shots']['maxItems']==6
     argv,kwargs=commands[0]
     assert '--offline' in argv and '-hf' not in argv
     assert kwargs['shell'] is False
+    assert observed[0]['_auth_header']==f"Bearer {kwargs['env']['LLAMA_API_KEY']}"
+    assert kwargs['env']['LLAMA_API_KEY'] not in argv
     assert process.stopped
     assert not (tmp_path/'job'/'engine-owner.json').exists()
 
@@ -110,3 +117,16 @@ def test_unknown_process_wins_port_race_is_never_contacted(writer_server,tmp_pat
         LocalWriter(path).generate(WritingRequest(**request_data()),work_dir=tmp_path/'job')
     assert observed==[]
     assert process.stopped
+
+
+def test_orphan_with_reused_pid_is_never_terminated(tmp_path,monkeypatch):
+    import video_workstation.adapters.local_writer as mod
+    work=tmp_path/'task';work.mkdir()
+    expected=tmp_path/'engine.exe'
+    record=work/'engine-owner.json'
+    record.write_text(json.dumps({'task_id':'task','identity':{'pid':999,'created':'old','exe':str(expected)}}))
+    monkeypatch.setattr(mod,'_process_identity',lambda pid:{'pid':999,'created':'new','exe':str(expected)})
+    killed=[]
+    monkeypatch.setattr(mod,'_inspect_windows_process',lambda *a,**kw:killed.append(True))
+    with pytest.raises(LocalWriterError):mod.cleanup_owned_engine(work,expected)
+    assert killed==[] and record.exists()

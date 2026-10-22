@@ -39,6 +39,10 @@ class Worker:
 
     def run_once(self, session: Session) -> bool:
         if self.settings is not None:
+            QueueService(session).recover_expired()
+            session.commit()
+            self._cleanup_writer_orphans(session)
+        if self.settings is not None:
             from .services.creation import advance_creations
             advance_creations(session, self.settings)
         queue = QueueService(session)
@@ -129,6 +133,28 @@ class Worker:
         session.commit()
         return True
 
+    def _cleanup_writer_orphans(self,session:Session):
+        from .adapters.local_writer import cleanup_owned_engine,LocalWriterError
+        from .writer_deployment import file_sha256,validate_writer_deployment
+        import re
+        root=(self.settings.data_dir/'writing-jobs').resolve()
+        if not root.is_dir():return
+        for record in root.glob('*/engine-owner.json'):
+            job=record.parent.resolve()
+            if root not in job.parents or not re.fullmatch('[a-f0-9]{32}',job.name):continue
+            task=session.get(Task,job.name)
+            if task is None or task.task_type!='write_script' or task.status=='running':continue
+            try:
+                runtime=task.runtime_config_snapshot
+                manifest=Path(runtime['writer_manifest'])
+                if file_sha256(manifest)!=runtime['manifest_sha256']:
+                    raise LocalWriterError('旧任务部署清单已改变，无法自动核验遗留进程')
+                info=validate_writer_deployment(manifest)
+                cleanup_owned_engine(job,info['exe_path'])
+            except (ValueError,OSError,KeyError):
+                task.error_message='遗留写作进程无法安全核验；请检查本机运行状态。原有素材已保留。'
+        session.commit()
+
     def _run_writer(self, session: Session, task_id: str, lease_token: str | None) -> bool:
         from .adapters.local_writer import LocalWriter,LocalWriterError
         from .models import WritingRevision
@@ -140,12 +166,14 @@ class Worker:
             existing=session.scalar(select(WritingRevision).where(WritingRevision.task_id==task.id))
             if existing is None:
                 profile=session.get(ModelProfile,task.model_profile_id)
-                if not writer_is_ready(profile) or task.model_config_fingerprint!=model_config_fingerprint(profile):
+                if profile is None or task.model_config_fingerprint!=model_config_fingerprint(profile):
                     raise LocalWriterError('本地写作配置已改变，请重新检查写作能力')
                 runtime=task.runtime_config_snapshot
                 manifest_path=Path(runtime['writer_manifest'])
                 if not manifest_path.is_file() or file_sha256(manifest_path)!=runtime['manifest_sha256']:
                     raise LocalWriterError('本地写作部署清单已改变，请重新验证')
+                if not writer_is_ready(profile):
+                    raise LocalWriterError('本地写作模型尚未准备好，请重新验证')
                 request=WritingRequest.model_validate(task.payload_json['request'])
                 root=self.settings.data_dir if self.settings else Path('data').resolve()
                 with ThreadPoolExecutor(max_workers=1) as executor:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
@@ -77,13 +78,26 @@ def save_writing_revision(session: Session, actor: User, document: WritingDocume
 
 
 def writer_is_ready(profile: ModelProfile | None) -> bool:
-    return bool(profile and profile.enabled and profile.provider=="local" and
+    ready=bool(profile and profile.enabled and profile.provider=="local" and
         (profile.capabilities_json or {}).get("text_ready") is True and
         profile.capabilities_json.get("text_ready_fingerprint")==model_config_fingerprint(profile))
+    if not ready:return False
+    # Fast page/queue check. Full file hashes are checked again by the adapter.
+    from ..writer_deployment import file_sha256,local_package_path
+    try:
+        runtime=profile.runtime_config_json;manifest=Path(runtime['writer_manifest']).resolve()
+        if not manifest.is_file() or manifest.stat().st_size>1024*1024 or file_sha256(manifest)!=runtime['manifest_sha256']:
+            return False
+        data=json.loads(manifest.read_text(encoding='utf-8-sig'));root=manifest.parent
+        for row in [*data['engine']['files'],{'path':data['model']['filename'],'bytes':data['model']['bytes']}]:
+            path=local_package_path(root,row['path'])
+            if not path.is_file() or path.stat().st_size!=row['bytes']:return False
+        return True
+    except (OSError,ValueError,KeyError,TypeError):return False
 
 
 def enqueue_writing(session: Session, actor: User, document: WritingDocument, request: WritingRequest,
-                    *, expected_latest: int, request_key: str) -> Task:
+                    *, expected_latest: int, request_key: str, expected_selected: int | None = None) -> Task:
     assert_writing_owner(actor,document);_lock(session,document)
     if not re.fullmatch(r"[a-f0-9]{32}",request_key):
         raise ValueError("生成请求标识无效，请刷新页面后重试")
@@ -99,6 +113,8 @@ def enqueue_writing(session: Session, actor: User, document: WritingDocument, re
             raise WritingConflict("同一个生成请求包含不同内容，请重新提交")
         return existing
     _version_check(document,expected_latest)
+    if expected_selected is not None and expected_selected!=(document.selected_version or 0):
+        raise WritingConflict("另一个页面切换了文案版本；请先核对当前版本后再改写")
     base_version=document.selected_version if request.base_body else None
     if request.base_body:
         if base_version is None or request.base_body.model_dump()!=get_writing_revision(session,document,base_version).body_json:

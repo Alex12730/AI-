@@ -67,3 +67,35 @@ def test_changed_manifest_does_not_execute_model(writing_db,tmp_path,monkeypatch
         assert s.get(Task,task_id).status=='terminal_failed'
         assert '清单' in s.get(Task,task_id).error_message
         assert called==[]
+
+
+def test_exhausted_task_orphan_is_reaped_before_next_writing_job(writing_db,tmp_path,monkeypatch):
+    import json
+    from datetime import datetime,timedelta,timezone
+    import video_workstation.adapters.local_writer as mod
+    db,owner,_=writing_db
+    old_id,_=queued(db,owner,tmp_path)
+    with db.session() as s:
+        old=s.get(Task,old_id);old.status='running';old.attempts=old.max_attempts
+        old.lease_token='expired';old.lease_expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+        old.heartbeat_at=old.lease_expires_at
+        actor=s.get(User,owner);req=WritingRequest(**request_data())
+        doc=create_writing_document(s,actor,req)
+        fresh=enqueue_writing(s,actor,doc,req,expected_latest=0,request_key='e'*32)
+        fresh_id=fresh.id
+    job=db.settings.data_dir/'writing-jobs'/old_id;job.mkdir(parents=True)
+    identity={'pid':1234567,'created':'old-time','exe':str(tmp_path/'engine/llama-server.exe')}
+    record=job/'engine-owner.json';record.write_text(json.dumps({'task_id':old_id,'identity':identity}))
+    killed=[]
+    monkeypatch.setattr(mod,'_process_identity',lambda pid:identity)
+    monkeypatch.setattr(mod,'_inspect_windows_process',lambda pid,terminate_expected=None:killed.append(pid))
+    def generate(*a,**k):
+        if record.exists():raise LocalWriterError('端口被遗留引擎占用')
+        return WritingBody(**body_data())
+    monkeypatch.setattr(mod.LocalWriter,'generate',generate)
+    with db.session() as s:
+        Worker('recovery-test',settings=db.settings).run_once(s)
+        assert s.get(Task,old_id).status=='terminal_failed'
+        assert s.get(Task,fresh_id).status=='succeeded'
+        assert killed==[1234567]
+        assert not record.exists()
