@@ -1,5 +1,12 @@
 let statusTimer;
 
+document.querySelector("[data-back-button]")?.addEventListener("click", () => {
+  let localPrevious = false;
+  try { localPrevious = new URL(document.referrer).origin === location.origin; } catch (_) {}
+  if (history.length > 1 && localPrevious) history.back();
+  else location.assign("/create");
+});
+
 function showStatus(message, isError = false) {
   const status = document.getElementById("app-status");
   if (!status) return;

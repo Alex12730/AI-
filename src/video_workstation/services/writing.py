@@ -119,6 +119,12 @@ def enqueue_writing(session: Session, actor: User, document: WritingDocument, re
     if request.base_body:
         if base_version is None or request.base_body.model_dump()!=get_writing_revision(session,document,base_version).body_json:
             raise WritingConflict("请先保存并选择要改写的文案版本")
+    active=session.scalar(select(Task).where(Task.project_id==document.project_id,
+        Task.task_type=='write_script',Task.status.in_(['queued','running'])).order_by(Task.created_at))
+    if active:
+        if active.payload_json.get('request_sha256')==digest:
+            return active
+        raise WritingConflict('本作品已有文案任务在排队或运行，请等待完成后再改写；当前编辑稿仍可保存')
     profile=session.scalar(select(ModelProfile).where(ModelProfile.slug=="qwen-local"))
     if not writer_is_ready(profile):
         raise ValueError("本地写作模型尚未准备好；请先完成模型安装与写作验证，可继续保存自己的文案")

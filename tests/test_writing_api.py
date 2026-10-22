@@ -98,3 +98,47 @@ def test_second_tab_selection_cannot_silently_change_rewrite_source(tmp_path):
         'expected_selected':2,'operation':'conversational','request_key':'d'*32})
     assert stale.status_code==409
     with app.state.database.session() as s:assert s.scalar(select(Task.id)) is None
+
+
+def test_live_activity_and_duplicate_generation_guard(tmp_path):
+    from datetime import datetime,timedelta,timezone
+    from test_local_writer import deployment
+    from video_workstation.writer_deployment import file_sha256
+    client,app=make_client(tmp_path);login(client,'member')
+    url=seed_revision(app,client)
+    with app.state.database.session() as s:
+        profile=s.scalar(select(ModelProfile).where(ModelProfile.slug=='qwen-local'))
+        manifest=deployment(tmp_path/'package')
+        profile.enabled=True;profile.runtime_config_json={'writer_manifest':str(manifest),'manifest_sha256':file_sha256(manifest)}
+        profile.capabilities_json={'text_ready':True,'text_ready_fingerprint':model_config_fingerprint(profile)}
+    page=client.get(url)
+    payload={'csrf_token':token(page),'expected_latest':1,'expected_selected':1,'operation':'generate','request_key':'1'*32}
+    assert client.post(url+'/generate',data=payload,follow_redirects=False).status_code==303
+    duplicate=client.post(url+'/generate',data={**payload,'request_key':'2'*32},follow_redirects=False)
+    assert duplicate.status_code==303
+    with app.state.database.session() as s:
+        tasks=list(s.scalars(select(Task)));assert len(tasks)==1
+        task=tasks[0];task.status='running';task.started_at=datetime.now(timezone.utc)-timedelta(seconds=40)
+        task.heartbeat_at=datetime.now(timezone.utc)-timedelta(seconds=3)
+    state=client.get(url+'/status').json()['activity']
+    assert state['state']=='running' and state['elapsed_seconds']>=40
+    assert state['heartbeat_age_seconds']<10 and state['active_count']==1
+    page=client.get(url)
+    assert 'data-writing-status-label' in page.text and '正在本机生成' in page.text
+    assert 'data-back-button' in page.text
+    assert 'data-writing-busy="yes"' in page.text
+    with app.state.database.session() as s:
+        task=s.scalar(select(Task));task.heartbeat_at=datetime.now(timezone.utc)-timedelta(minutes=3)
+    assert client.get(url+'/status').json()['activity']['state']=='recovering'
+    with app.state.database.session() as s:
+        task=s.scalar(select(Task));task.status='terminal_failed';task.error_message='端口被占用'
+    final=client.get(url+'/status').json()['activity']
+    assert final['state']=='failed' and final['active_count']==0
+    assert '端口被占用' in final['detail']
+
+
+def test_models_page_has_back_and_start_controls(tmp_path):
+    client,app=make_client(tmp_path);login(client,'admin')
+    page=client.get('/models')
+    assert 'data-back-button' in page.text
+    assert '返回上一页' in page.text and '返回开始制作' in page.text

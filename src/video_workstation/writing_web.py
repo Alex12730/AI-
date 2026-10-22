@@ -2,17 +2,57 @@
 from __future__ import annotations
 
 import secrets
+from datetime import datetime,timezone
 from fastapi import Depends,HTTPException,Request
 from fastapi.responses import RedirectResponse,JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import ModelProfile,Task,WritingDocument,WritingRevision
+from .models import ModelProfile,Task,WorkerStatus,WritingDocument,WritingRevision
 from .services.creation import RECIPES
 from .services.writing import (assert_writing_owner,create_writing_document,enqueue_writing,
     get_writing_revision,publish_writing_revision,save_writing_revision,select_writing_revision,writer_is_ready)
 from .writing_contracts import WritingBody,WritingRequest
+
+
+def writing_activity(session,document):
+    now=datetime.now(timezone.utc)
+    def age(value):
+        if value is None:return None
+        if value.tzinfo is None:value=value.replace(tzinfo=timezone.utc)
+        return max(0,int((now-value).total_seconds()))
+    tasks=list(session.scalars(select(Task).where(Task.project_id==document.project_id,
+        Task.task_type=='write_script').order_by(Task.created_at.desc())))
+    queued=[t for t in tasks if t.status=='queued']
+    running=next((t for t in tasks if t.status=='running'),None)
+    result={'state':'idle','label':'尚未开始生成','detail':'点击生成文案后，运行状态会在这里更新。',
+        'active_count':len(queued)+int(running is not None),'queued_count':len(queued),
+        'elapsed_seconds':None,'heartbeat_age_seconds':None}
+    if running:
+        elapsed=age(running.started_at);heartbeat=age(running.heartbeat_at)
+        expired=running.lease_expires_at and running.lease_expires_at.replace(tzinfo=timezone.utc)<now
+        result.update(elapsed_seconds=elapsed,heartbeat_age_seconds=heartbeat)
+        if heartbeat is None or heartbeat>90 or expired:
+            result.update(state='recovering',label='运行状态待确认',
+                detail='后台心跳暂未更新，正在等待恢复。请勿重复提交；已保存的文案不会丢失。')
+        else:
+            result.update(state='running',label='正在本机生成文案',
+                detail=f'已运行 {elapsed or 0} 秒，最近心跳 {heartbeat} 秒前。生成期间仍可编辑并保存。')
+        if queued:result['detail']+=f' 本作品另有 {len(queued)} 个任务等待。'
+    elif queued:
+        worker=session.scalar(select(WorkerStatus).order_by(WorkerStatus.last_heartbeat_at.desc()).limit(1))
+        online=worker and worker.state!='stopped' and age(worker.last_heartbeat_at)<=90
+        result.update(state='queued',label='文案任务正在排队',detail=(
+            f'本作品有 {len(queued)} 个任务等待，后台处理完成后会自动更新。' if online else
+            '任务已保存，但尚未收到后台 Worker 心跳。请检查后台运行状态，不必重复提交。'))
+    elif tasks and tasks[0].status=='terminal_failed':
+        result.update(state='failed',label='本次文案生成失败',detail=tasks[0].error_message or '请检查本地模型后重试；原有文案已保留。')
+    elif document.latest_version:
+        result.update(state='succeeded',label='文案已就绪',detail='请在下方查看候选或编辑稿，修改保存后再确认分镜。')
+    elif tasks:
+        result.update(label='当前没有运行中的文案任务',detail='上次任务已结束或暂停。可查看任务队列了解详情。')
+    return result
 
 
 def register_writing_routes(app,*,templates,session_dependency,html_user,validate_csrf):
@@ -32,7 +72,7 @@ def register_writing_routes(app,*,templates,session_dependency,html_user,validat
             'candidates':[v for v in versions if v.kind!='manual' and v.version!=document.selected_version][:3],
             'tasks':tasks,'writer_ready':writer_is_ready(profile),'recipe':RECIPES[document.recipe],
             'csrf_token':request.session['csrf'],'request_key':secrets.token_hex(16),'page':'create',
-            'error':error,'values':values or {}},status_code=status_code)
+            'error':error,'values':values or {},'activity':writing_activity(session,document)},status_code=status_code)
 
     def message(exc):
         if isinstance(exc,ValidationError):
@@ -72,6 +112,7 @@ def register_writing_routes(app,*,templates,session_dependency,html_user,validat
         document=owned(session,actor,document_id)
         tasks=list(session.scalars(select(Task).where(Task.project_id==document.project_id,Task.task_type=='write_script').order_by(Task.created_at.desc()).limit(5)))
         return JSONResponse({'latest_version':document.latest_version,'selected_version':document.selected_version,
+            'activity':writing_activity(session,document),
             'tasks':[{'status':t.status,'message':t.error_message or ''} for t in tasks]},headers={'Cache-Control':'no-store'})
 
     @app.post('/writing/{document_id}/generate')

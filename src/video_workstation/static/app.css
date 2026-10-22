@@ -21,6 +21,15 @@
   line-height: 1.55;
 }
 
+.page-back-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+.writing-run-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.2rem 0; margin: 1.4rem 0; border-block: 1px solid var(--line); }
+.writing-run-status h2 { font-size: 1.2rem; margin: 0 0 .5rem; }
+.writing-run-status p { margin: 0 0 .4rem; max-width: 65ch; }
+.writing-run-status small { color: var(--muted); }
+.writing-run-status[data-state="running"] h2 { color: var(--green); }
+.writing-run-status[data-state="failed"] h2, .writing-run-status[data-state="recovering"] h2 { color: var(--red); }
+.writing-run-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
+
 .creation-steps { display: flex; gap: 1.5rem; flex-wrap: wrap; padding: 0 0 1rem; margin: 0 0 2rem; list-style: none; border-bottom: 1px solid var(--line); color: var(--muted); }
 .creation-steps [aria-current] { color: var(--ink); font-weight: 750; }
 .creation-form { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; padding: 1.5rem; }
