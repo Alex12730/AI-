@@ -49,12 +49,12 @@
 
 **Interfaces:** Produces `WritingRequest` 和 `WritingBody`（Pydantic BaseModel）；`WritingDocument`、`WritingRevision`、`WritingPublication`（SQLAlchemy）。`WritingRequest` 包含 idea、recipe、target_seconds、aspect_ratio、operation、base_body（WritingBody|None）、instruction（str，默认空）。
 
-- [ ] 先写合同测试：合法的 30 秒对象包含 6 段五秒镜头；31 秒、空文案、37 段、超长自定义要求、未知操作均被拒绝；body 拒绝多余字段，正文不能包含被当成 HTML 执行的内容。
-- [ ] 运行 `.venv/Scripts/python.exe -m pytest tests/test_writing_contracts.py -q`。Expected: FAIL，缺少新合同/模型。
-- [ ] 实现合同、三张表与迁移。将 `creation_plans.project_id` 的唯一约束移除，改为普通索引，保留 storyboard_id 唯一；允许同一作品的多个已冻结计划分别指向不同分镜版本。迁移须兼容初始迁移使用当前 metadata 的空库安装；对旧库用 batch/naming_convention 明确删除旧唯一约束，不重建或清空用户数据。
-- [ ] 增加旧库迁移测试：以 0005 表结构建库并保留一个用户、旧 CreationPlan 与 Task；升级后旧 ID 均不变，同一项目可有两个不同 storyboard_id 的计划，重复 storyboard_id 仍被唯一约束拒绝。
-- [ ] 跑合同、迁移及既有 creation 测试。Expected: PASS，迁移 head 为 `20261022_0006`。
-- [ ] 提交本任务，记录迁移和检查结果。
+- [x] 先写合同测试：合法的 30 秒对象包含 6 段五秒镜头；31 秒、空文案、37 段、超长自定义要求、未知操作均被拒绝；body 拒绝多余字段，正文不能包含被当成 HTML 执行的内容。
+- [x] 运行 `.venv/Scripts/python.exe -m pytest tests/test_writing_contracts.py -q`。Expected: FAIL，缺少新合同/模型。
+- [x] 实现合同、三张表与迁移。将 `creation_plans.project_id` 的唯一约束移除，改为普通索引，保留 storyboard_id 唯一；允许同一作品的多个已冻结计划分别指向不同分镜版本。迁移须兼容初始迁移使用当前 metadata 的空库安装；对旧库用 batch/naming_convention 明确删除旧唯一约束，不重建或清空用户数据。
+- [x] 增加旧库迁移测试：以 0005 表结构建库并保留一个用户、旧 CreationPlan 与 Task；升级后旧 ID 均不变，同一项目可有两个不同 storyboard_id 的计划，重复 storyboard_id 仍被唯一约束拒绝。
+- [x] 跑合同、迁移及既有 creation 测试。Expected: PASS，迁移 head 为 `20261022_0006`。
+- [x] 提交本任务，记录迁移和检查结果。
 
 ## Task 2: 草稿、候选、确认发布与版本冲突
 
@@ -69,13 +69,13 @@
 - `select_writing_revision(session, actor, document, version: int, *, expected_latest: int) -> WritingRevision`。
 - `publish_writing_revision(session, actor, document, version: int) -> CreationPlan`。
 
-- [ ] 先写测试：手工保存 v1→排队改写→另存手稿 v2→改写结束只新增 v3，selected_version 仍为用户选定版；错误 expected_latest 返回冲突；其他成员或管理员不可代替所有者修改个人稿。
-- [ ] 写确认测试：同一 revision 两次确认得到同一个 plan；改写后确认得到新 storyboard.version 与新 plan，旧 plan.snapshot_json/Task/Shot 均不改变；未确认不会调用 start_creation、排视频或修改 approved 状态。
-- [ ] 运行 `.venv/Scripts/python.exe -m pytest tests/test_writing.py -q`。Expected: FAIL，缺少上述服务。
-- [ ] 实现服务。创建文案容器时保留一个合法 draft Storyboard，以兼容既有项目序列化；发布时创建新的结构化 Storyboard 和 draft CreationPlan，镜头数和描述取自用户选择的 WritingBody，不再重新按标点拆句。用户后续仍需确认制作，不在文案确认时开跑视频。
-- [ ] 并发写入先取得 document 所属 Project 的写锁，再读取 version counter；更新/确认必须重读，避免依赖过期 ORM 实例。任务 request_key 在同文档/用户/相同 payload 内幂等；同 key 不同 payload 返回冲突，不吞掉用户修改。
-- [ ] 在写作 Task 中冻结 request、base_revision、模型配置指纹、模板版本、deployment manifest SHA；候选结果落库与 task.succeed 同一事务完成，拒绝失效 lease_token。
-- [ ] 跑版本、发布与旧 creation 测试。Expected: PASS；提交本任务。
+- [x] 先写测试：手工保存 v1→排队改写→另存手稿 v2→改写结束只新增 v3，selected_version 仍为用户选定版；错误 expected_latest 返回冲突；其他成员或管理员不可代替所有者修改个人稿。
+- [x] 写确认测试：同一 revision 两次确认得到同一个 plan；改写后确认得到新 storyboard.version 与新 plan，旧 plan.snapshot_json/Task/Shot 均不改变；未确认不会调用 start_creation、排视频或修改 approved 状态。
+- [x] 运行 `.venv/Scripts/python.exe -m pytest tests/test_writing.py -q`。Expected: FAIL，缺少上述服务。
+- [x] 实现服务。创建文案容器时保留一个合法 draft Storyboard，以兼容既有项目序列化；发布时创建新的结构化 Storyboard 和 draft CreationPlan，镜头数和描述取自用户选择的 WritingBody，不再重新按标点拆句。用户后续仍需确认制作，不在文案确认时开跑视频。
+- [x] 并发写入先取得 document 所属 Project 的写锁，再读取 version counter；更新/确认必须重读，避免依赖过期 ORM 实例。任务 request_key 在同文档/用户/相同 payload 内幂等；同 key 不同 payload 返回冲突，不吞掉用户修改。
+- [x] 在写作 Task 中冻结 request、base_revision、模型配置指纹、模板版本、deployment manifest SHA；候选结果落库与 task.succeed 同一事务完成，拒绝失效 lease_token。
+- [x] 跑版本、发布与旧 creation 测试。Expected: PASS；提交本任务。
 
 ## Task 3: 真正的本地写作引擎与 Worker 分支
 
@@ -83,16 +83,16 @@
 
 **Interfaces:** Consumes `WritingRequest`/`WritingBody`、Task 2 candidate service. Produces `LocalWriterError(ValueError)` 与 `LocalWriter(manifest_path: Path).generate(request: WritingRequest, *, work_dir: Path, timeout_seconds: int=900) -> WritingBody`；`validate_writer_deployment(manifest_path: Path) -> dict`。
 
-- [ ] 先写 loopback 测试服务器和进程测试：响应为合法 body 时结构化解析；空结果/缺字段/截断/finish_reason=length/超过 1 MiB 响应/重定向/外部 URL/非本人进程占端口必须失败。中文、双引号、换行及脚本状输入不能变成 Shell 指令。
-- [ ] 写 Worker 测试：write_script 和视频任务走同一 QueueService；推理过程保持心跳；成功只新增候选；重复恢复只生成一个 revision；过期租约或模型指纹变化拒绝写回；缺文件不下载、不调用云端、其他任务可继续。
-- [ ] 运行新测试。Expected: FAIL，缺少 adapter 与 Worker 分支。
-- [ ] 实现 adapter：由 Worker 启动其专有子进程，固定 `127.0.0.1:8091`、`--model <绝对 GGUF 路径>`、`--offline`、`--jinja`、`--n-gpu-layers 0`、`--ctx-size 16384`、单并发。端口已占用即阻塞，不连接未知服务。只使用 urllib `ProxyHandler({})`，禁止跟随重定向，健康检查超时 120 秒，整个生成超时 900 秒。
-- [ ] 在向 8091 发送健康请求前，通过 Windows TCP 端口所有者信息核对监听 PID 等于本次启动的 EXE PID，同时检查子进程未退出；端口被其他进程抢占也要失败，不能凭 HTTP 200 认领未知服务。测试模拟检查与启动之间的端口竞争。
-- [ ] 请求 `/v1/chat/completions` 使用 WritingBody JSON schema、`chat_template_kwargs.enable_thinking=false`、temperature=0.7、top_p=0.8、top_k=20、min_p=0、presence_penalty=1.5、max_tokens=4096；不发送 tools、图片 URL 或任何远程引用。模型输出仅作为候选数据，不执行其指令或代码。
-- [ ] 子进程在任务结束/异常的 finally 中先 terminate、等待最多 10 秒、必要时 kill 并 wait，只操作本次启动且仍持有的进程对象。日志写本地忽略目录，默认不在错误提示中公开完整文案。
-- [ ] 为崩溃恢复保存引擎 PID、创建时间和 task_id 的本地所有权记录；重新启动只清理标识和可执行绝对路径都匹配的旧引擎。无法核实时阻塞该写作任务，不能用 taskkill 全杀 Python 或未知 8091 服务。完成后删除本任务所有权记录。
-- [ ] `qwen-local` 增加 `text_ready` 独立能力状态及真实准备测试指纹；不使用视频 validated_presets 伪造文案准入。现有 model_readiness 的视频语义保持兼容，界面明确用途。
-- [ ] 跑新测试及完整 pytest。Expected: PASS；提交本任务。
+- [x] 先写 loopback 测试服务器和进程测试：响应为合法 body 时结构化解析；空结果/缺字段/截断/finish_reason=length/超过 1 MiB 响应/重定向/外部 URL/非本人进程占端口必须失败。中文、双引号、换行及脚本状输入不能变成 Shell 指令。
+- [x] 写 Worker 测试：write_script 和视频任务走同一 QueueService；推理过程保持心跳；成功只新增候选；重复恢复只生成一个 revision；过期租约或模型指纹变化拒绝写回；缺文件不下载、不调用云端、其他任务可继续。
+- [x] 运行新测试。Expected: FAIL，缺少 adapter 与 Worker 分支。
+- [x] 实现 adapter：由 Worker 启动其专有子进程，固定 `127.0.0.1:8091`、`--model <绝对 GGUF 路径>`、`--offline`、`--jinja`、`--n-gpu-layers 0`、`--ctx-size 16384`、单并发。端口已占用即阻塞，不连接未知服务。只使用 urllib `ProxyHandler({})`，禁止跟随重定向，健康检查超时 120 秒，整个生成超时 900 秒。
+- [x] 在向 8091 发送健康请求前，通过 Windows TCP 端口所有者信息核对监听 PID 等于本次启动的 EXE PID，同时检查子进程未退出；端口被其他进程抢占也要失败，不能凭 HTTP 200 认领未知服务。测试模拟检查与启动之间的端口竞争。
+- [x] 请求 `/v1/chat/completions` 使用 WritingBody JSON schema、`chat_template_kwargs.enable_thinking=false`、temperature=0.7、top_p=0.8、top_k=20、min_p=0、presence_penalty=1.5、max_tokens=4096；不发送 tools、图片 URL 或任何远程引用。模型输出仅作为候选数据，不执行其指令或代码。
+- [x] 子进程在任务结束/异常的 finally 中先 terminate、等待最多 10 秒、必要时 kill 并 wait，只操作本次启动且仍持有的进程对象。日志写本地忽略目录，默认不在错误提示中公开完整文案。
+- [x] 为崩溃恢复保存引擎 PID、创建时间和 task_id 的本地所有权记录；重新启动只清理标识和可执行绝对路径都匹配的旧引擎。无法核实时阻塞该写作任务，不能用 taskkill 全杀 Python 或未知 8091 服务。完成后删除本任务所有权记录。
+- [x] `qwen-local` 增加 `text_ready` 独立能力状态及真实准备测试指纹；不使用视频 validated_presets 伪造文案准入。现有 model_readiness 的视频语义保持兼容，界面明确用途。
+- [x] 跑新测试及完整 pytest。Expected: PASS；提交本任务。
 
 ## Task 4: 工作台内写作、比较和修改
 
@@ -100,13 +100,13 @@
 
 **Interfaces:** Consumes Tasks 1–3. Produces CSRF 保护的 POST `/writing`、`/writing/{id}/generate`、`/save`、`/select`、`/publish`；GET `/writing/{id}`。每个写入都需要本人权限及版本标识。不要在 GET 中触发生成。
 
-- [ ] 先写 HTTP 测试：一句话新建→生成任务→候选显示→手改保存→选择版本→确认文案进入该版本的分镜；越权/无 CSRF 返回 403，失效版本返回 409 并保留用户提交内容；无引擎时清楚说明缺少能力，原模板入口仍能用。
-- [ ] 写重复提交和旧计划测试：双击发布返回同一计划；已有视频执行中时确认新的文案，不修改或取消旧 Task；“我的作品”将文案及各版制作计划按同一项目归组，显示版本和阶段，避免同名重复行让人误认为多个无关作品。
-- [ ] 运行 API 测试。Expected: FAIL，缺少写作路由/页面。
-- [ ] 修改开始页：提供“让工作台帮我写”和“我已有完整文案”两种入口，前者是默认；视频类型说明直接跟随下拉选择变化，移除底部重复的说明长列表。移除“配音请先自行录制”的误导，准确显示独立录音导入尚未接通。
-- [ ] 写作页有可编辑标题/概要/完整文案、折叠分镜建议，主按钮“保存我的修改”和“确认文案，查看分镜”；改写按钮“更简短”“更口语”“改结尾”“按要求改写”“另写一版”。未保存修改必须先显式保存或提示；收到候选绝不自动替换编辑区。
-- [ ] 版本列表显示来源（手工/生成/改写）、时间及所基于版本；选中历史版本可复制为新手稿。模型名仅放高级说明；没有角色图/声音能力的步骤不可显示已完成或可生成。
-- [ ] 浏览器验证 1280 与 390 视口、键盘、生成中仍可编辑、错误后正文保留；网络检查页面资源均为本机。执行 node `--check static/writing.js` 及完整 pytest。Expected: PASS；提交本任务。
+- [x] 先写 HTTP 测试：一句话新建→生成任务→候选显示→手改保存→选择版本→确认文案进入该版本的分镜；越权/无 CSRF 返回 403，失效版本返回 409 并保留用户提交内容；无引擎时清楚说明缺少能力，原模板入口仍能用。
+- [x] 写重复提交和旧计划测试：双击发布返回同一计划；已有视频执行中时确认新的文案，不修改或取消旧 Task；“我的作品”将文案及各版制作计划按同一项目归组，显示版本和阶段，避免同名重复行让人误认为多个无关作品。
+- [x] 运行 API 测试。Expected: FAIL，缺少写作路由/页面。
+- [x] 修改开始页：提供“让工作台帮我写”和“我已有完整文案”两种入口，前者是默认；视频类型说明直接跟随下拉选择变化，移除底部重复的说明长列表。移除“配音请先自行录制”的误导，准确显示独立录音导入尚未接通。
+- [x] 写作页有可编辑标题/概要/完整文案、折叠分镜建议，主按钮“保存我的修改”和“确认文案，查看分镜”；改写按钮“更简短”“更口语”“改结尾”“按要求改写”“另写一版”。未保存修改必须先显式保存或提示；收到候选绝不自动替换编辑区。
+- [x] 版本列表显示来源（手工/生成/改写）、时间及所基于版本；选中历史版本可复制为新手稿。模型名仅放高级说明；没有角色图/声音能力的步骤不可显示已完成或可生成。
+- [x] 浏览器验证 1280 与 390 视口、键盘、生成中仍可编辑、错误后正文保留；网络检查页面资源均为本机。执行 node `--check static/writing.js` 及完整 pytest。Expected: PASS；提交本任务。
 
 ## Task 5: 准备离线模型、真实生成和交付
 
@@ -114,14 +114,14 @@
 
 **Interfaces:** Consumes Task 3 deployment manifest contract. Manifest schema=1，包含 engine 的 version、exe_path、文件列表/哈希/字节数，model 的 repo、immutable revision、filename、sha256、bytes、license_path，context_size=16384、gpu_layers=0、template_version、verification（时间、用例和结果）。所有路径来自部署根的相对路径，拒绝绝对外部路径、越界、缺失 DLL 和指纹不一致。
 
-- [ ] 先写测试：损坏文件、../路径、URL 型路径、缺少 SHA、清单变更后旧验证记录全部不能就绪；准备流程中断只留下 .part，不激活半个包；不运行下载的脚本，不通过模型卡命令自动安装。
-- [ ] 运行部署测试。Expected: FAIL，缺少准备/清单验证接口。
-- [ ] 准备脚本只在明确调用时联网：从 Qwen 官方仓库解析并固定 commit，再取得 `Qwen3-8B-Q4_K_M.gguf` 的真实 LFS SHA-256/字节数；从 ggml-org/llama.cpp 官方发布选择 Windows CPU x64 包，固定具体 release/asset ID 和发布 digest（没有官方 digest 则记录来源并独立验证，不伪称官方哈希）。保存 LICENSE、完整引擎 DLL 清单，检查存储后下载到 .part，校验后原子激活到 `models/local-writer` 与 `runtime/local-writer`。不得下载整个含所有量化的模型仓库。
-- [ ] 首次准备失败可按官方来源重试，但不能偷换模型/量化；资源无法取得时记录具体阻塞证据。日常 adapter 不包含安装、HF/远程模型参数或联网修复路径。
-- [ ] 用真实模型分别生成故事、产品教程、知识讲解三种稿；再对一个已手改版本执行改写，实测结构、中文可读性、耗时、内存及版本隔离，结果写入 `data/writing-verification`。这不等于画质或商业成片质量保证。
-- [ ] 完成断网推理检查：下载准备完成后关闭代理与外部可达网络，在受控验证窗口内实际从一句话生成并保存。记录具体断网手段、引擎进程绝对路径和命令参数；若不能安全执行真实断网，保留“未验收”，不以静态 URL 扫描替代。
-- [ ] 正式数据迁移前做 SQLite 一致性备份。确认没有活动用户任务后更新本机 Web/Worker；保留账号、素材与旧版本。完整测试及独立代码审查通过后本地提交；不自动推送 GitHub。
-- [ ] 最后更新操作说明，清楚区分本阶段可用的写稿与仍待接通的图片、配音、角色参考和全链独立部署。
+- [x] 先写测试：损坏文件、../路径、URL 型路径、缺少 SHA、清单变更后旧验证记录全部不能就绪；准备流程中断只留下 .part，不激活半个包；不运行下载的脚本，不通过模型卡命令自动安装。
+- [x] 运行部署测试。Expected: FAIL，缺少准备/清单验证接口。
+- [x] 准备脚本只在明确调用时联网：从 Qwen 官方仓库解析并固定 commit，再取得 `Qwen3-8B-Q4_K_M.gguf` 的真实 LFS SHA-256/字节数；从 ggml-org/llama.cpp 官方发布选择 Windows CPU x64 包，固定具体 release/asset ID 和发布 digest（没有官方 digest 则记录来源并独立验证，不伪称官方哈希）。保存 LICENSE、完整引擎 DLL 清单，检查存储后下载到 .part，校验后原子激活到 `models/local-writer` 与 `runtime/local-writer`。不得下载整个含所有量化的模型仓库。
+- [x] 首次准备失败可按官方来源重试，但不能偷换模型/量化；资源无法取得时记录具体阻塞证据。日常 adapter 不包含安装、HF/远程模型参数或联网修复路径。
+- [x] 用真实模型分别生成故事、产品教程、知识讲解三种稿；再对一个已手改版本执行改写，实测结构、中文可读性、耗时、内存及版本隔离，结果写入 `data/writing-verification`。这不等于画质或商业成片质量保证。
+- [ ] 完成断网推理检查（本批未做物理断网，按本条约定保留未验收）：下载准备完成后关闭代理与外部可达网络，在受控验证窗口内实际从一句话生成并保存。记录具体断网手段、引擎进程绝对路径和命令参数；若不能安全执行真实断网，保留“未验收”，不以静态 URL 扫描替代。
+- [x] 正式数据迁移前做 SQLite 一致性备份。确认没有活动用户任务后更新本机 Web/Worker；保留账号、素材与旧版本。完整测试及独立代码审查通过后本地提交；不自动推送 GitHub。
+- [x] 最后更新操作说明，清楚区分本阶段可用的写稿与仍待接通的图片、配音、角色参考和全链独立部署。
 
 ## 官方资料核对与选型依据（2026-10-22）
 
@@ -133,4 +133,4 @@
 
 已按 spec 第 6.1 节收敛为可单独验收的文案阶段。五项 Review Focus 分别有任务 2、3、4 对应测试。后续声音/角色/参考图/剪辑不在本计划混写；所有确认行为只推进至下一阶段，不自动开启整片推理。
 
-默认推荐直接在当前会话按任务实施，并在最后独立审查。当前尚未安装模型、修改产品代码或变更用户数据；实施待计划审阅。
+用户已批准直接实施与最终独立审查。任务 1–5 已落地并部署；160 项自动化测试通过，真实三类写作与改写、网页至 Worker 闭环已验证。独立审查发现的跨标签页基线、终态孤儿进程及旧报告复用问题均已修复并复审通过。物理断网验收仍未完成，按任务 5 的例外明确记录，不视为已通过；完整独立 Python、角色与声音继续后续阶段。

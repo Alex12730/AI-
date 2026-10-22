@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-现有实现采用 FastAPI、SQLite WAL、SQLAlchemy/Alembic、Jinja2 与少量原生 JavaScript，目标硬件为 RTX A6000 48GB。2026-10-22 用户要求以 Windows 本机、个人新手、全离线独立操作为主要使用方式；WSL2 与局域网部署保留为旧有高级路径，不再是默认入口。新增流程仍处于设计审阅阶段，详见 docs/superpowers/specs/2026-10-22-personal-offline-video-workstation-design.md。
+现有实现采用 FastAPI、SQLite WAL、SQLAlchemy/Alembic、Jinja2 与少量原生 JavaScript，目标硬件为 RTX A6000 48GB。2026-10-22 用户要求以 Windows 本机、个人新手、全离线独立操作为主要使用方式；WSL2 与局域网部署保留为旧有高级路径，不再是默认入口。个人制作向导及本地文案阶段已实现，声音与角色等完整链路继续按设计分阶段实施。
 
 ## Users
 
@@ -18,7 +18,7 @@ web
 
 ## Product Purpose
 
-把“需求 → 分镜确认 → 自动制作 → 预览导出”收敛为新手可用的纯本地视频生产流程。日常无需 Codex、命令行、ComfyUI 节点或手动选择模型；后台保持可追溯、可恢复、重型任务严格串行。上述新手向导与整片自动化是本次新增目标，并非已经实现的界面能力。
+把“需求 → 文案修改确认 → 分镜确认 → 自动制作 → 预览导出”收敛为新手可用的纯本地视频生产流程。已有制作向导和文案编辑页；后台保持可追溯、可恢复、任务串行。声音、角色图及全链独立离线运行仍需继续实施和验收。
 
 ## Positioning
 
@@ -39,7 +39,7 @@ web
 
 ## Evidence on Hand
 
-已安装三模型并有真实低规格小样与媒体质检记录，部署接入提交为 460697d。2026-10-22 重新查询：三模型均为已配置，正式档位准入记录为 0；Qwen 文案、CosyVoice、MuseTalk、Video2X 配置仍未启用。业务虚拟环境目前引用 Codex 缓存中的基础 Python，尚需迁移为专用运行环境。界面不得以小样或既有 104 项测试推断正式性能、完整断网或新增自动化能力已经验收。
+已安装三模型并有真实低规格小样与媒体质检记录，部署接入提交为 460697d；正式视频档位准入记录仍为 0。Qwen3-8B Q4_K_M + llama.cpp CPU b11804 已完成三类30秒文案及改写的真实结构测试，知识样稿人工核对发现事实错误，必须保留人工确认。CosyVoice、MuseTalk、Video2X 尚未通过本阶段验收。业务虚拟环境仍引用 Codex 缓存中的基础 Python，需迁移为专用运行环境。详情和样本耗时见 docs/operations/local-writing-guide.md；不得以结构测试推断事实准确性、正式视频性能或完整断网已验收。
 
 ## Product Principles
 
