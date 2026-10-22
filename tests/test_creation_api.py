@@ -28,6 +28,9 @@ def test_guided_pages_and_honest_production_gate(tmp_path):
     url = created.headers["location"]
     detail = client.get(url)
     assert "确认分镜" in detail.text and "验证" in detail.text
+    assert 'AI 生成 · 等待模型验证' in detail.text
+    assert '可选：使用已有视频替代 AI 生成' in detail.text
+    assert '<strong>需要真实素材</strong>' not in detail.text
     blocked = client.post(url + "/start", data={"csrf_token": token(detail)})
     assert blocked.status_code == 409
     assert "验证" in blocked.text

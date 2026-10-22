@@ -6,18 +6,18 @@
 <h2>{{ state_label }}</h2>
 {% if error or plan.error_message %}<div class="creation-notice is-error" role="alert"><p>{{ error or plan.error_message }}</p></div>{% endif %}
 {% if plan.status == 'draft' %}
-<p class="creation-note">{{ recipe.hint }} 每段可导入一个 5 秒真实视频，也可让工作台自动选择已验证的模型。导入后会自动选中该素材。</p>
+<p class="creation-note">{{ recipe.hint }} AI 生成的画面无需上传视频，工作台会匹配已验证的模型。真实录屏、产品实拍或自己的口播才需要对应素材；也可以自愿导入已有视频。</p>
 <ol class="creation-shots">{% for choice in choices %}
 <li class="creation-shot" id="shot-{{ choice.shot.id }}">
   <div class="creation-shot-heading"><h3>第 {{ choice.shot.sequence_no }} 段 · {{ choice.shot.title }}</h3><span>5 秒</span></div>
   <p>{{ choice.shot.prompt }}</p>
-  <p class="creation-note"><strong>{{ choice.model_slug or ('已选真实视频' if choice.asset_id else '需要准备') }}</strong> · {{ choice.reason }}</p>
+  <p class="creation-note"><strong>{{ choice.model_slug or ('已选真实视频' if choice.asset_id else ('需要真实素材' if choice.source == 'material' else 'AI 生成 · 等待模型验证')) }}</strong> · {{ choice.reason }}</p>
   {% if choice.issue and choice.issue != choice.reason %}<p class="creation-issue">{{ choice.issue }}</p>{% endif %}
   <details><summary>修改这段内容</summary><form method="post" action="/creations/{{ plan.id }}/shots/{{ choice.shot.id }}/edit" class="creation-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label class="wide">标题<input name="title" maxlength="200" required value="{{ choice.shot.title }}"></label><label class="wide">画面内容<textarea name="prompt" maxlength="20000" rows="3" required>{{ choice.shot.prompt }}</textarea></label><div class="wide"><button class="button button-secondary">保存这段内容</button></div>
   </form></details>
   {% if choice.asset_id %}<video controls preload="none" class="creation-video" src="/assets/{{ choice.asset_id }}/content" aria-label="第 {{ choice.shot.sequence_no }} 段素材预览"></video>{% endif %}
-  <details><summary>导入 / 更换真实视频</summary>
+  <details><summary>{{ '导入 / 更换真实视频' if choice.source == 'material' else '可选：使用已有视频替代 AI 生成' }}</summary>
     <form method="post" action="/creations/{{ plan.id }}/shots/{{ choice.shot.id }}/video" enctype="multipart/form-data" class="creation-upload">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>选择本地视频（约 5 秒，保留声音）<input type="file" name="video" accept=".mp4,.mov,.webm" required></label><button class="button button-secondary" type="submit">导入并使用</button>
@@ -28,7 +28,7 @@
     </form>{% endif %}
   </details>
 </li>{% endfor %}</ol>
-<div class="creation-notice"><p>带有“需要准备”的段落，先导入真实视频或完成模型正式验证。不会自动改用云服务或 Demo。</p>{% if user.role == 'admin' %}<a class="text-link" href="/models">查看模型验证状态</a>{% else %}<p>模型验证由本机管理员在“帮助与设置 → 模型与准入”中完成。</p>{% endif %}</div>
+<div class="creation-notice"><p>“AI 生成 · 等待模型验证”表示无需上传素材，但需先通过对应视频档位的本机验证。“需要真实素材”才表示必须导入对应视频。所有段落就绪后才可开始制作。</p>{% if user.role == 'admin' %}<a class="text-link" href="/models">查看模型验证状态</a>{% else %}<p>模型验证由本机管理员在“帮助与设置 → 模型与准入”中完成。</p>{% endif %}</div>
 <form method="post" action="/creations/{{ plan.id }}/start" class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="button button-primary" {% if choices|selectattr('issue')|list %}disabled{% endif %}>确认并开始制作</button><span>确认后冻结本次内容，自动制作并合成。</span></form>
 {% else %}
 <p class="creation-note">关掉此页面后，本机后台仍会继续制作。当前为固定分镜版本；关闭工作台后台或电脑会中断正在执行的镜头。</p>

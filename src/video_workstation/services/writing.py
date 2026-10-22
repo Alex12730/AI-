@@ -178,10 +178,9 @@ def publish_writing_revision(session: Session, actor: User, document: WritingDoc
     body=WritingBody.model_validate(revision.body_json);body.validate_for_target(document.target_seconds)
     next_version=(session.scalar(select(func.max(Storyboard.version)).where(Storyboard.project_id==document.project_id)) or 0)+1
     board=Storyboard(project_id=document.project_id,version=next_version,created_by_id=actor.id,status="draft")
+    from .creation import resolve_scene_type
     for i,part in enumerate(body.shots,1):
-        scene=part.scene_type
-        if document.recipe in {"product","talking"} or any(w in part.visual for w in ("界面","按钮","录屏","商标","包装","价格")):
-            scene="product_ui"
+        scene=resolve_scene_type(document.recipe,part.visual,part.scene_type)
         board.shots.append(Shot(sequence_no=i,title=part.title,prompt=part.visual,scene_type=scene,
             duration_seconds=5,aspect_ratio=document.aspect_ratio,status="draft"))
     session.add(board);session.flush()

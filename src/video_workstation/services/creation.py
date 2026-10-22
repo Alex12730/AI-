@@ -39,6 +39,39 @@ RECIPES = {
 }
 
 
+def resolve_scene_type(recipe: str, visual: str, suggested: str) -> str:
+    """Model scene labels are hints; enforce real-material rules from the brief."""
+    if recipe in {'product','talking'} or any(word in visual for word in
+        ('界面','按钮','录屏','商标','包装','价格','真实产品','产品实拍')):
+        return 'product_ui'
+    if suggested=='product_ui' and recipe in {'story','knowledge','acting'}:
+        return 'character' if recipe=='acting' else 'broll'
+    return suggested
+
+
+def repair_draft_scene_types(session: Session, actor: User, plan: CreationPlan) -> int:
+    """Explicit draft-only repair; never edit writing history or frozen runs."""
+    assert_plan_owner(actor,plan)
+    session.execute(update(CreationPlan).where(CreationPlan.id==plan.id).values(status=CreationPlan.status))
+    session.refresh(plan)
+    session.refresh(plan.storyboard)
+    if plan.status!='draft' or plan.storyboard.status!='draft':
+        raise ValueError('只能修复尚未开始制作的分镜草稿')
+    shots=list(plan.storyboard.shots)
+    if session.scalar(select(Task.id).where(Task.shot_id.in_([shot.id for shot in shots])).limit(1)):
+        raise ValueError('只能修复尚未开始制作的分镜草稿')
+    changes=[]
+    for shot in shots:
+        corrected=resolve_scene_type(plan.recipe,shot.prompt,shot.scene_type)
+        if corrected!=shot.scene_type:
+            changes.append({'shot_id':shot.id,'before':shot.scene_type,'after':corrected})
+            shot.scene_type=corrected
+    if changes:
+        session.add(AuditLog(actor_id=actor.id,action='creation.repair_scene_types',entity_type='creation',
+            entity_id=plan.id,details_json={'changes':changes}))
+    return len(changes)
+
+
 def create_guided_project(session: Session, actor: User, *, name: str, script: str,
                           recipe: str, target_seconds: int, aspect_ratio: str) -> CreationPlan:
     if recipe not in RECIPES:
@@ -101,7 +134,7 @@ def recommend_shot(shot: Shot, profiles: list[ModelProfile]) -> dict:
         candidates.append(slug)
     if not candidates:
         return {"source": "generate", "model_slug": None, "alternatives": [],
-            "reason": f"这个镜头的 {shot.duration_seconds:g} 秒 {shot.aspect_ratio} 档位还没有可用的正式验证；请先验证模型，或导入真实视频。"}
+            "reason": f"可由 AI 生成，无需上传素材；{shot.duration_seconds:g} 秒 {shot.aspect_ratio} 档位尚未通过本机验证，验证完成后才能启动。"}
     selected = candidates[0]
     reason = "人物表演优先使用可输出声音的已验证模型；不保证精确台词。" if shot.scene_type == "character" else "环境镜头不要求对白，优先选择已验证的画面生成模型。"
     return {"source": "generate", "model_slug": selected, "alternatives": candidates[1:], "reason": reason}

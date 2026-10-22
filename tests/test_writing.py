@@ -125,3 +125,33 @@ def test_removed_writer_package_is_not_shown_as_ready(writing_db):
         manifest=Path(profile.runtime_config_json['writer_manifest'])
         (manifest.parent/'model.gguf').unlink()
         assert not writer_is_ready(profile)
+
+
+def test_story_mislabeled_as_product_ui_publishes_generated_shots(writing_db):
+    db,owner,_=writing_db
+    with db.session() as s:
+        doc=make_doc(s,owner);actor=s.get(User,owner)
+        data=body_data()
+        for shot in data['shots']:shot['scene_type']='product_ui'
+        save_writing_revision(s,actor,doc,WritingBody(**data),expected_latest=0)
+        plan=publish_writing_revision(s,actor,doc,1)
+        assert all(shot.scene_type=='broll' for shot in plan.storyboard.shots)
+        original=s.scalar(select(WritingRevision).where(WritingRevision.document_id==doc.id))
+        assert original.body_json['shots'][0]['scene_type']=='product_ui'
+
+
+def test_story_repair_only_changes_unstarted_draft_classification(writing_db):
+    from video_workstation.services.creation import repair_draft_scene_types
+    db,owner,_=writing_db
+    with db.session() as s:
+        actor=s.get(User,owner);doc=make_doc(s,owner)
+        save_writing_revision(s,actor,doc,WritingBody(**body_data()),expected_latest=0)
+        plan=publish_writing_revision(s,actor,doc,1)
+        for shot in plan.storyboard.shots:shot.scene_type='product_ui'
+        before=[(shot.id,shot.prompt,shot.title) for shot in plan.storyboard.shots]
+        assert repair_draft_scene_types(s,actor,plan)==6
+        assert [(shot.id,shot.prompt,shot.title) for shot in plan.storyboard.shots]==before
+        assert repair_draft_scene_types(s,actor,plan)==0
+        plan.status='running'
+        with pytest.raises(ValueError,match='尚未开始'):
+            repair_draft_scene_types(s,actor,plan)
