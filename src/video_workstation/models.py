@@ -96,6 +96,25 @@ class Shot(Base):
     storyboard: Mapped[Storyboard] = relationship(back_populates="shots")
 
 
+class CreationPlan(Base):
+    __tablename__ = "creation_plans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True)
+    storyboard_id: Mapped[str] = mapped_column(ForeignKey("storyboards.id"), unique=True)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    recipe: Mapped[str] = mapped_column(String(30))
+    target_seconds: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    project: Mapped[Project] = relationship()
+    storyboard: Mapped[Storyboard] = relationship()
+
+
 class ModelProfile(Base):
     __tablename__ = "model_profiles"
 

@@ -38,6 +38,9 @@ class Worker:
         return LocalCommandAdapter(command=command, name=profile.slug)
 
     def run_once(self, session: Session) -> bool:
+        if self.settings is not None:
+            from .services.creation import advance_creations
+            advance_creations(session, self.settings)
         queue = QueueService(session)
         touch_worker(session, self.worker_id, "idle")
         session.commit()

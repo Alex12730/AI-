@@ -57,6 +57,19 @@ def add_task(session, user, project, shot, profile, *, priority=2, created_at=No
     return task
 
 
+def test_atomic_claim_rechecks_global_running_guard(database, monkeypatch):
+    with database.session() as session:
+        user, project, shot, profile = seed(session)
+        first = add_task(session, user, project, shot, profile)
+        first.status = "running"
+        add_task(session, user, project, shot, profile)
+    with database.session() as session:
+        # Another worker can start after the initial advisory SELECT. Simulate
+        # that stale empty read; the atomic UPDATE must still protect the GPU.
+        monkeypatch.setattr(session, "scalar", lambda *a, **kw: None)
+        assert QueueService(session).claim_next("second-worker") is None
+
+
 def test_claim_uses_priority_aging_and_allows_only_one_running_task(database):
     now = datetime.now(timezone.utc)
     with database.session() as session:

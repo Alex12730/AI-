@@ -1,6 +1,6 @@
 # AI 视频自动化工作站 MVP
 
-2026-10-22 新增设计稿：[个人全离线视频工作台](docs/superpowers/specs/2026-10-22-personal-offline-video-workstation-design.md)与[新手操作手册](docs/operations/offline-beginner-guide.md)。包含独立运行、统一四步向导、内置模板和自动选模型方案；这些新功能待设计确认与实施。手册已区分当前可用操作和改造后的目标操作。
+2026-10-22：已开始落实[个人全离线视频工作台设计](docs/superpowers/specs/2026-10-22-personal-offline-video-workstation-design.md)。第一批代码提供 `/create` 简易入口、六条模板、按镜头推荐、个人确认与自动合成。[本批操作说明与范围](docs/operations/guided-production-first-release.md)包含实际可用步骤；专用运行时及全套断网验收仍待完成。[完整目标操作手册](docs/operations/offline-beginner-guide.md)同时保留。
 
 一套面向单张 RTX A6000 48GB 的纯本地视频生产调度平台。它把项目、分镜审批、模型准入、单 GPU 队列、Worker 租约、结果追溯和基础质检组织在一起；不包含任何云端视频生成 API 客户端。
 
@@ -8,6 +8,7 @@
 
 ## 已实现
 
+- 简易制作：六种内置流程 → 五秒分镜与可编辑内容 → 导入绑定真实视频或自动匹配已验证模型 → 本人确认 → 原队列逐镜头制作 → 自动合成 → 预览下载。可边界暂停/恢复，重复确认与推进保持幂等；冻结资产 ID 和模型指纹。默认登录后进入 `/create`，旧团队项目流程保留。
 - FastAPI + Jinja2 操作台、JSON API、Argon2 账号、成员/管理员权限。
 - 项目 → 分镜草案（逐镜头选择 5/10/15/20 秒与 16:9/9:16）→ 提交 → 管理员审批 → 逐镜头入队；待审批分镜可由项目创建者或管理员退回修改。
 - 草稿镜头编辑、成员创建与项目授权、任务取消/重试/优先级、模型启停、管理员验收归档 API。

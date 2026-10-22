@@ -20,6 +20,41 @@
   font-size: 15px;
   line-height: 1.55;
 }
+
+.creation-steps { display: flex; gap: 1.5rem; flex-wrap: wrap; padding: 0 0 1rem; margin: 0 0 2rem; list-style: none; border-bottom: 1px solid var(--line); color: var(--muted); }
+.creation-steps [aria-current] { color: var(--ink); font-weight: 750; }
+.creation-form { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; padding: 1.5rem; }
+.creation-form .wide { grid-column: 1 / -1; }
+.creation-form label, .creation-upload label { display: grid; gap: .5rem; }
+.creation-form small, .creation-note { color: var(--muted); line-height: 1.7; max-width: 75ch; }
+.creation-help { margin-top: 2rem; max-width: 75ch; }
+.creation-help dl > div { padding: 1rem 0; border-bottom: 1px solid var(--line); }
+.creation-help dt { font-weight: 700; }
+.creation-help dd { margin: .3rem 0 0; color: var(--muted); }
+.creation-shots { padding: 0; list-style: none; }
+.creation-shot { padding: 1.5rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.creation-shot-heading { display: flex; justify-content: space-between; gap: 1rem; }
+.creation-shot h3 { margin: 0; }
+.creation-shot p { max-width: 75ch; white-space: pre-wrap; }
+.creation-shot details { margin-top: 1rem; }
+.creation-shot summary, .creation-advanced summary, .nav-settings summary { cursor: pointer; padding: .6rem 0; }
+.creation-upload { display: flex; align-items: end; flex-wrap: wrap; gap: .8rem; margin: 1rem 0; }
+.creation-upload label { flex: 1; min-width: 0; }
+.creation-video { display: block; width: 100%; max-width: 760px; max-height: 440px; background: #17212b; border-radius: 10px; margin: 1rem 0; }
+.creation-notice { padding: 1rem 1.2rem; margin: 1.5rem 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.creation-notice p { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0; }
+.creation-notice.is-error, .creation-issue { color: #8f271d; }
+.creation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: 2rem 0; }
+.creation-actions span { color: var(--muted); }
+.creation-delivery { padding: 1.5rem; }
+.creation-advanced { margin-top: 2rem; }
+.nav-settings { color: #e7e4dc; }
+.nav-settings > summary { padding: .75rem; }
+@media (max-width: 650px) {
+  .creation-form { grid-template-columns: 1fr; padding: 1rem; }
+  .creation-steps { gap: .65rem 1rem; font-size: .85rem; }
+  .creation-shot-heading { flex-wrap: wrap; }
+}
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { background: var(--canvas); color: var(--ink); }

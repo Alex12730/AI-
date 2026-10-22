@@ -291,7 +291,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session["user_id"] = admin.id
         request.session["csrf"] = secrets.token_urlsafe(24)
         session.commit()
-        response = RedirectResponse("/", status_code=303)
+        response = RedirectResponse("/create", status_code=303)
         response.headers["X-CSRF-Token"] = request.session["csrf"]
         return response
 
@@ -329,7 +329,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         request.session["user_id"] = user.id
         request.session["csrf"] = secrets.token_urlsafe(24)
-        response = RedirectResponse("/", status_code=303)
+        response = RedirectResponse("/create", status_code=303)
         response.headers["X-CSRF-Token"] = request.session["csrf"]
         return response
 
@@ -1170,6 +1170,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for profile in session.scalars(select(ModelProfile).order_by(ModelProfile.display_name))
         ]
 
+    from .creation_web import register_creation_routes
+    register_creation_routes(app, settings=settings, templates=templates,
+        session_dependency=session_dependency, html_user=html_user, validate_csrf=validate_csrf)
     return app
 
 

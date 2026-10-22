@@ -11,11 +11,14 @@
   <a class="skip-link" href="#main">跳到主要内容</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
-      <a class="brand" href="/" aria-label="AI 视频工作站首页">
+      <a class="brand" href="/create" aria-label="AI 视频工作站首页">
         <span class="brand-mark" aria-hidden="true">AV</span>
-        <span><strong>片场调度台</strong><small>LOCAL WORKSTATION</small></span>
+        <span><strong>本地视频工作台</strong><small>LOCAL WORKSTATION</small></span>
       </a>
       <nav aria-label="主要功能">
+        <a class="nav-link {% if page == 'create' %}is-active{% endif %}" href="/create"{% if page == 'create' %} aria-current="page"{% endif %}>开始制作</a>
+        <a class="nav-link {% if page == 'works' %}is-active{% endif %}" href="/works"{% if page == 'works' %} aria-current="page"{% endif %}>我的作品</a>
+        <details class="nav-settings"><summary>帮助与设置</summary>
         <a class="nav-link {% if page == 'dashboard' %}is-active{% endif %}" href="/"{% if page == 'dashboard' %} aria-current="page"{% endif %}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg>
           制作工作台
@@ -34,6 +37,7 @@
           模型与准入
         </a>
         {% endif %}
+        </details>
       </nav>
       <div class="sidebar-foot">
         <span class="status-line"><i class="status-dot status-{{ system_summary.level }}"></i>{{ system_summary.label }}</span>

@@ -37,9 +37,11 @@ class QueueService:
             return None
         candidates.sort(key=lambda task: (self.effective_priority(task, now), _aware(task.created_at), task.id))
         candidate = candidates[0]
+        running_task = Task.__table__.alias("running_task")
         result = self.session.execute(
             update(Task)
-            .where(Task.id == candidate.id, Task.status == "queued")
+            .where(Task.id == candidate.id, Task.status == "queued",
+                ~select(running_task.c.id).where(running_task.c.status == "running").exists())
             .values(
                 status="running",
                 leased_by=worker_id,
