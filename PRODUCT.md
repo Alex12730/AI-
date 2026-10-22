@@ -8,16 +8,17 @@ web
 
 ## Stack
 
-用户已指定：Windows 11 + WSL2 Ubuntu，FastAPI、SQLite WAL、SQLAlchemy/Alembic、Jinja2 与少量原生 JavaScript。部署目标是单张 RTX A6000 48GB 的办公局域网工作站。
+现有实现采用 FastAPI、SQLite WAL、SQLAlchemy/Alembic、Jinja2 与少量原生 JavaScript，目标硬件为 RTX A6000 48GB。2026-10-22 用户要求以 Windows 本机、个人新手、全离线独立操作为主要使用方式；WSL2 与局域网部署保留为旧有高级路径，不再是默认入口。新增流程仍处于设计审阅阶段，详见 docs/superpowers/specs/2026-10-22-personal-offline-video-workstation-design.md。
 
 ## Users
 
+- 首要用户：不懂三个模型与节点操作的个人视频创作者，同时制作产品教程、知识口播、故事短片与创意广告；通过统一制作向导完成任务。
 - 普通成员：创建项目、编辑分镜、提交审批、生成自己有权限访问的镜头、查看结果并提出返工。
 - 管理员：审批分镜、调整任务优先级、验收成片、管理模型准入档位、成员账号与系统健康。
 
 ## Product Purpose
 
-把“脚本 → 分镜确认 → 镜头生成 → 配音字幕 → 合成质检 → 成片归档”收敛为一套可追溯、可恢复的纯本地视频生产流程。成功意味着 Web 服务与 GPU Worker 解耦、重启不丢任务、重型任务严格串行、每条成片能够回溯到模型、参数、素材、随机种子和审批记录。
+把“需求 → 分镜确认 → 自动制作 → 预览导出”收敛为新手可用的纯本地视频生产流程。日常无需 Codex、命令行、ComfyUI 节点或手动选择模型；后台保持可追溯、可恢复、重型任务严格串行。上述新手向导与整片自动化是本次新增目标，并非已经实现的界面能力。
 
 ## Positioning
 
@@ -25,7 +26,7 @@ web
 
 ## Operating Context
 
-平台在办公局域网内使用。活跃数据位于 WSL2 文件系统和 NVMe；完成验收的项目包归档到机械盘。Qwen、Wan 2.2、MiniMax H3、LTX-2.3、CosyVoice、MuseTalk、Video2X 与 FFmpeg 均通过本地适配器接入，首次下载完成后可离线运行。
+日常通过 Windows 桌面入口打开本机工作台，默认仅回环访问，关闭 Codex、断网后仍需独立工作。已有 Wan 2.2、MiniMax H3、LTX-2.3 与 FFmpeg 接入；Qwen 文案、CosyVoice、MuseTalk、自动字幕等不能仅凭配置登记宣称可用。模型与依赖在准备阶段一次性装齐或通过离线包导入，制作期间不得下载、检查更新或使用云服务。用户项目与原素材保存在本地。
 
 ## Capabilities and Constraints
 
@@ -38,7 +39,7 @@ web
 
 ## Evidence on Hand
 
-当前没有真实模型权重、硬件基准结果、品牌素材或成片样本。界面不得捏造吞吐、成功率或模型可用性；未验证档位必须明确标记并隐藏生产入口。
+已安装三模型并有真实低规格小样与媒体质检记录，部署接入提交为 460697d。2026-10-22 重新查询：三模型均为已配置，正式档位准入记录为 0；Qwen 文案、CosyVoice、MuseTalk、Video2X 配置仍未启用。业务虚拟环境目前引用 Codex 缓存中的基础 Python，尚需迁移为专用运行环境。界面不得以小样或既有 104 项测试推断正式性能、完整断网或新增自动化能力已经验收。
 
 ## Product Principles
 
