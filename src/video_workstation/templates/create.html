@@ -1,19 +1,21 @@
 {% extends "base.html" %}
 {% block title %}开始制作 · 本地视频工作台{% endblock %}
 {% block content %}
-<header class="page-header"><div><h1>从一句话，开始你的作品</h1><p>在这里生成文案、保存修改，再确认分镜。生成文案不会启动视频制作。</p></div></header>
+<header class="page-header beginner-header"><div><p class="eyebrow">本地视频工作台</p><h1>从一句话开始做视频</h1><p>你只需要填写想法，工作台会按步骤帮你完成文案、分镜和后续制作。</p></div><div class="header-actions"><a class="button button-secondary" href="/works">查看我的作品</a></div></header>
+<ol class="beginner-steps" aria-label="制作流程"><li class="is-current"><span>1</span><strong>说清想法</strong><small>输入一句话</small></li><li><span>2</span><strong>确认文案</strong><small>可以反复修改</small></li><li><span>3</span><strong>确认分镜</strong><small>检查每个镜头</small></li><li><span>4</span><strong>生成视频</strong><small>后台自动处理</small></li></ol>
+<div class="beginner-note"><strong>现在就在正确的页面</strong><span>日常使用请打开 <code>127.0.0.1:8000</code>。<code>8188</code> 是后台模型引擎，不需要手动操作。</span></div>
 {% if error %}<div class="creation-notice is-error" role="alert"><strong>请调整后再继续</strong><p>{{ error }}</p></div>{% endif %}
-<section class="panel"><div class="panel-heading"><h2>让工作台帮我写</h2></div><form action="/writing" method="post" class="creation-form">
+<section class="panel beginner-panel"><div class="panel-heading"><div><h2>第一步：让工作台帮我写</h2><p>先告诉我你想做什么，后面每一步都能修改。</p></div><span class="step-badge">开始</span></div><form action="/writing" method="post" class="creation-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label class="wide">你想做一个什么视频？<textarea name="idea" rows="4" maxlength="4000" required placeholder="例如：小女孩在森林寻找萤火虫的温暖故事，结尾有一点惊喜。">{{ values.idea|default('') }}</textarea></label>
   <label>视频类型<select name="recipe" data-recipe-select>{% for key,item in recipes.items() %}<option value="{{ key }}" data-hint="{{ item.hint }}" {% if values.recipe|default('story')==key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><small data-recipe-hint>{{ recipes[values.recipe if values.recipe in recipes else 'story'].hint }}</small></label>
   <label>整片时长（秒）<input type="number" name="target_seconds" min="5" max="180" step="5" required value="{{ values.target_seconds|default(30) }}"><small>目前按每段 5 秒安排分镜。</small></label>
   <label>画面方向<select name="aspect_ratio"><option value="16:9" {% if values.aspect_ratio|default('16:9')=='16:9' %}selected{% endif %}>横屏 · 电脑 / 课程</option><option value="9:16" {% if values.aspect_ratio=='9:16' %}selected{% endif %}>竖屏 · 手机短视频</option></select></label>
-  <p class="creation-note">先生成候选文案，由你修改确认。角色图、独立配音与录音导入尚未接通。</p>
+  <p class="creation-note">提交后先生成文案，不会马上消耗 GPU。你确认文案后，才会进入分镜和视频制作。</p>
   {% if not writer_ready %}<p class="wide creation-issue">本地写作模型尚未准备好。可以先保存想法，或使用下方“我已有完整文案”。</p>{% endif %}
   <div class="wide creation-actions"><button name="intent" value="generate" class="button button-primary" {% if not writer_ready %}disabled{% endif %}>生成文案</button><button name="intent" value="save" class="button button-secondary">先保存想法</button></div>
 </form></section>
-<details class="creation-advanced" {% if error and not values.idea %}open{% endif %}><summary>我已有完整文案</summary><p class="creation-note">用现有文案直接建立模板分镜，不调用写作模型。</p>
+<details class="creation-advanced beginner-existing" {% if error and not values.idea %}open{% endif %}><summary><strong>我已有完整文案，直接开始</strong><span>粘贴文案，不调用写作模型</span></summary>
 <section class="panel creation-intro"><form action="/create" method="post" class="creation-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>作品名称<input name="name" maxlength="160" required value="{{ values.name|default('') }}" placeholder="例如：森林中的一天"></label>
