@@ -13,7 +13,10 @@ if ($FFmpegDirectory) {
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
     throw '需要 FFmpeg 和 FFprobe，请传入 -FFmpegDirectory。'
 }
-if (-not $env:VIDEO_WORKSTATION_DATA_DIR) { $env:VIDEO_WORKSTATION_DATA_DIR = Join-Path $projectRoot 'data' }
+if (-not $env:VIDEO_WORKSTATION_DATA_DIR) {
+    $storageRoot = if (Test-Path -LiteralPath 'G:\AI_Workstation\data') { 'G:\AI_Workstation' } else { $projectRoot }
+    $env:VIDEO_WORKSTATION_DATA_DIR = Join-Path $storageRoot 'data'
+}
 $dataDirectory = $env:VIDEO_WORKSTATION_DATA_DIR
 New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
 $secretPath = Join-Path $dataDirectory 'session-secret.txt'
