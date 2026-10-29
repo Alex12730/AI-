@@ -57,6 +57,19 @@ def add_task(session, user, project, shot, profile, *, priority=2, created_at=No
     return task
 
 
+def test_atomic_claim_rechecks_global_running_guard(database, monkeypatch):
+    with database.session() as session:
+        user, project, shot, profile = seed(session)
+        first = add_task(session, user, project, shot, profile)
+        first.status = "running"
+        add_task(session, user, project, shot, profile)
+    with database.session() as session:
+        # Another worker can start after the initial advisory SELECT. Simulate
+        # that stale empty read; the atomic UPDATE must still protect the GPU.
+        monkeypatch.setattr(session, "scalar", lambda *a, **kw: None)
+        assert QueueService(session).claim_next("second-worker") is None
+
+
 def test_claim_uses_priority_aging_and_allows_only_one_running_task(database):
     now = datetime.now(timezone.utc)
     with database.session() as session:
@@ -72,6 +85,19 @@ def test_claim_uses_priority_aging_and_allows_only_one_running_task(database):
 
     with database.session() as session:
         assert QueueService(session).claim_next("worker-b", now=now, lease_seconds=60) is None
+
+
+def test_marketing_priority_stays_ahead_of_aged_normal_task(database):
+    now = datetime.now(timezone.utc)
+    with database.session() as session:
+        user, project, shot, profile = seed(session)
+        normal = add_task(session, user, project, shot, profile, priority=1,
+                          created_at=now - timedelta(hours=4))
+        marketing = add_task(session, user, project, shot, profile, priority=-1, created_at=now)
+        assert QueueService.effective_priority(normal, now) == 0
+        assert QueueService.effective_priority(marketing, now) == -1
+    with database.session() as session:
+        assert QueueService(session).claim_next("worker", now=now).id == marketing.id
 
 
 def test_expired_lease_is_recovered_without_duplicate_execution(database):

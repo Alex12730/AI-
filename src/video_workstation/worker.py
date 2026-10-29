@@ -38,16 +38,27 @@ class Worker:
         return LocalCommandAdapter(command=command, name=profile.slug)
 
     def run_once(self, session: Session) -> bool:
+        if self.settings is not None:
+            QueueService(session).recover_expired()
+            session.commit()
+            self._cleanup_writer_orphans(session)
+        if self.settings is not None:
+            from .services.creation import advance_creations
+            advance_creations(session, self.settings)
         queue = QueueService(session)
         touch_worker(session, self.worker_id, "idle")
         session.commit()
-        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds)
+        from .thermal import thermal_dispatch_allowed
+        allow_heavy = self.settings is None or thermal_dispatch_allowed(self.settings)
+        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds, allow_heavy=allow_heavy)
         if task is None:
             return False
         lease_token = task.lease_token
         task_id = task.id
         touch_worker(session, self.worker_id, "running", current_task_id=task.id)
         session.commit()
+        if task.task_type == "write_script":
+            return self._run_writer(session, task_id, lease_token)
         if task.task_type == "compose_project":
             return self._run_compose(session, task_id, lease_token)
         if task.task_type == "upscale":
@@ -121,6 +132,80 @@ class Worker:
         else:
             queue.fail(task, error_class=result.error_class or "infrastructure", message=result.error_message or "未知错误", lease_token=lease_token)
         touch_worker(session, self.worker_id, "idle")
+        session.commit()
+        return True
+
+    def _cleanup_writer_orphans(self,session:Session):
+        from .adapters.local_writer import cleanup_owned_engine,LocalWriterError
+        from .writer_deployment import file_sha256,validate_writer_deployment
+        import re
+        root=(self.settings.data_dir/'writing-jobs').resolve()
+        if not root.is_dir():return
+        for record in root.glob('*/engine-owner.json'):
+            job=record.parent.resolve()
+            if root not in job.parents or not re.fullmatch('[a-f0-9]{32}',job.name):continue
+            task=session.get(Task,job.name)
+            if task is None or task.task_type!='write_script' or task.status=='running':continue
+            try:
+                runtime=task.runtime_config_snapshot
+                manifest=Path(runtime['writer_manifest'])
+                if file_sha256(manifest)!=runtime['manifest_sha256']:
+                    raise LocalWriterError('旧任务部署清单已改变，无法自动核验遗留进程')
+                info=validate_writer_deployment(manifest)
+                cleanup_owned_engine(job,info['exe_path'])
+            except (ValueError,OSError,KeyError):
+                task.error_message='遗留写作进程无法安全核验；请检查本机运行状态。原有素材已保留。'
+        session.commit()
+
+    def _run_writer(self, session: Session, task_id: str, lease_token: str | None) -> bool:
+        from .adapters.local_writer import LocalWriter,LocalWriterError
+        from .models import WritingRevision
+        from .services.writing import store_writing_candidate,WritingConflict,writer_is_ready
+        from .writer_deployment import file_sha256
+        from .writing_contracts import WritingBody,WritingRequest
+        task=session.get(Task,task_id)
+        try:
+            existing=session.scalar(select(WritingRevision).where(WritingRevision.task_id==task.id))
+            if existing is None:
+                profile=session.get(ModelProfile,task.model_profile_id)
+                if profile is None or task.model_config_fingerprint!=model_config_fingerprint(profile):
+                    raise LocalWriterError('本地写作配置已改变，请重新检查写作能力')
+                runtime=task.runtime_config_snapshot
+                manifest_path=Path(runtime['writer_manifest'])
+                if not manifest_path.is_file() or file_sha256(manifest_path)!=runtime['manifest_sha256']:
+                    raise LocalWriterError('本地写作部署清单已改变，请重新验证')
+                if not writer_is_ready(profile):
+                    raise LocalWriterError('本地写作模型尚未准备好，请重新验证')
+                request=WritingRequest.model_validate(task.payload_json['request'])
+                root=self.settings.data_dir if self.settings else Path('data').resolve()
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future=executor.submit(LocalWriter(manifest_path).generate,request,work_dir=root/'writing-jobs'/task.id)
+                    while True:
+                        try:
+                            body=future.result(timeout=self.heartbeat_seconds)
+                            break
+                        except FutureTimeout:
+                            session.refresh(task)
+                            QueueService(session).heartbeat(task,self.worker_id,lease_token,lease_seconds=self.lease_seconds)
+                            touch_worker(session,self.worker_id,'running',current_task_id=task.id)
+                            session.commit()
+                session.refresh(profile)
+                if not writer_is_ready(profile) or task.model_config_fingerprint!=model_config_fingerprint(profile):
+                    raise LocalWriterError('生成期间写作配置已改变，候选未写入，请重新验证')
+                existing=store_writing_candidate(session,task,body,lease_token=lease_token)
+            else:
+                WritingBody.model_validate(existing.body_json)
+                session.refresh(task)
+            QueueService(session).succeed(task,{'revision_id':existing.id,'version':existing.version},lease_token=lease_token)
+        except WritingConflict:
+            session.rollback()
+        except Exception as exc:
+            session.rollback()
+            task=session.get(Task,task_id);session.refresh(task)
+            if task.status=='running' and task.lease_token==lease_token:
+                QueueService(session).fail(task,error_class='configuration',
+                    message=str(exc) if isinstance(exc,LocalWriterError) else '本地写作任务失败；原有文案已保留',lease_token=lease_token)
+        touch_worker(session,self.worker_id,'idle')
         session.commit()
         return True
 

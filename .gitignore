@@ -13,3 +13,5 @@ outputs/
 .env
 .superpowers/
 .impeccable/review/
+.playwright-cli/
+output/playwright/

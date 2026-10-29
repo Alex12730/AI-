@@ -1,5 +1,12 @@
 let statusTimer;
 
+document.querySelector("[data-back-button]")?.addEventListener("click", () => {
+  let localPrevious = false;
+  try { localPrevious = new URL(document.referrer).origin === location.origin; } catch (_) {}
+  if (history.length > 1 && localPrevious) history.back();
+  else location.assign("/create");
+});
+
 function showStatus(message, isError = false) {
   const status = document.getElementById("app-status");
   if (!status) return;
@@ -59,6 +66,84 @@ document.addEventListener("submit", async (event) => {
     showStatus(error.message, true);
   }
 });
+
+const thermalStrip = document.querySelector("[data-thermal-strip]");
+if (thermalStrip) {
+  const updateThermal = async () => {
+    try {
+      const response = await fetch("/api/thermal/status", {cache: "no-store"});
+      if (!response.ok) throw new Error("monitor unavailable");
+      const status = await response.json();
+      thermalStrip.className = `thermal-strip thermal-${status.level}`;
+      thermalStrip.querySelector("[data-thermal-temperature]").textContent =
+        status.temperature_c == null ? "温度未知" : `${status.temperature_c}℃`;
+      thermalStrip.querySelector("[data-thermal-message]").textContent = status.message || "状态未知";
+      const detail = document.querySelector("[data-thermal-detail]");
+      if (detail) detail.textContent = status.temperature_c == null ? "温度未知" : `${status.temperature_c}℃`;
+      const message = document.querySelector("[data-thermal-detail-message]");
+      if (message) message.textContent = status.message || "状态未知";
+      const sampled = document.querySelector("[data-thermal-sampled]");
+      if (sampled) sampled.textContent = `最近采样：${status.last_sample_at || "暂无"}`;
+      const dailyMax = document.querySelector("[data-thermal-daily-max]");
+      if (dailyMax) dailyMax.textContent = status.daily_max_c == null ? "暂无数据" : `${status.daily_max_c}℃`;
+      const chart = document.querySelector("[data-thermal-chart]");
+      if (chart) {
+        chart.replaceChildren();
+        const samples = Array.isArray(status.samples) ? status.samples.slice(-720) : [];
+        let points = [];
+        let previousTime = null;
+        const flush = () => {
+          if (points.length > 1) {
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+            line.setAttribute("points", points.join(" "));
+            line.setAttribute("fill", "none");
+            line.setAttribute("stroke", "#a63f36");
+            line.setAttribute("stroke-width", "2");
+            chart.append(line);
+          }
+          points = [];
+        };
+        samples.forEach((sample, index) => {
+          const time = Date.parse(sample.at);
+          const degrees = sample.temperature_c;
+          if (!Number.isFinite(time) || !Number.isFinite(degrees) ||
+              (previousTime != null && time - previousTime > 10000)) flush();
+          if (Number.isFinite(time) && Number.isFinite(degrees)) {
+            const x = samples.length < 2 ? 0 : index * 719 / (samples.length - 1);
+            const y = Math.max(0, Math.min(100, (100 - degrees) * 100 / 70));
+            points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+          } else flush();
+          previousTime = Number.isFinite(time) ? time : null;
+        });
+        flush();
+      }
+      const resume = document.querySelector("[data-thermal-resume]");
+      if (resume) resume.disabled = !status.recovery_ready;
+    } catch {
+      thermalStrip.className = "thermal-strip thermal-unavailable";
+      thermalStrip.querySelector("[data-thermal-temperature]").textContent = "温度未知";
+      thermalStrip.querySelector("[data-thermal-message]").textContent = "监测状态无法连接";
+    }
+  };
+  updateThermal();
+  setInterval(updateThermal, 5000);
+  document.querySelector("[data-thermal-resume]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/thermal/resume", {
+        method: "POST", headers: {"X-CSRF-Token": button.dataset.csrf || ""},
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "恢复请求失败");
+      showStatus(result.message);
+      setTimeout(updateThermal, 1000);
+    } catch (error) {
+      showStatus(error.message, true);
+      updateThermal();
+    }
+  });
+}
 
 document.addEventListener("submit", async (event) => {
   const form = event.target.closest(".compose-form");

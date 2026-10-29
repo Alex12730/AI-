@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .models import Task
+from .models import ModelProfile, Task
 
 
 def utcnow() -> datetime:
@@ -23,23 +23,34 @@ class QueueService:
 
     @staticmethod
     def effective_priority(task: Task, now: datetime) -> int:
+        if task.priority < 0:
+            return task.priority  # Reserved for confirmed marketing work; aging cannot overtake it.
         waited_hours = max(0, int((now - _aware(task.created_at)).total_seconds() // 3600))
         return max(0, task.priority - waited_hours)
 
-    def claim_next(self, worker_id: str, *, now: datetime | None = None, lease_seconds: int = 300) -> Task | None:
+    def claim_next(self, worker_id: str, *, now: datetime | None = None, lease_seconds: int = 300,
+                   allow_heavy: bool = True) -> Task | None:
         now = now or utcnow()
         self.recover_expired(now=now)
         running = self.session.scalar(select(Task.id).where(Task.status == "running").limit(1))
         if running is not None:
             return None
         candidates = list(self.session.scalars(select(Task).where(Task.status == "queued")))
+        if not allow_heavy:
+            profile_heavy = {p.id: p.is_heavy for p in self.session.scalars(select(ModelProfile))}
+            candidates = [task for task in candidates if not (
+                task.task_type == "upscale" or
+                (task.task_type == "generate" and profile_heavy.get(task.model_profile_id, True))
+            )]
         if not candidates:
             return None
         candidates.sort(key=lambda task: (self.effective_priority(task, now), _aware(task.created_at), task.id))
         candidate = candidates[0]
+        running_task = Task.__table__.alias("running_task")
         result = self.session.execute(
             update(Task)
-            .where(Task.id == candidate.id, Task.status == "queued")
+            .where(Task.id == candidate.id, Task.status == "queued",
+                ~select(running_task.c.id).where(running_task.c.status == "running").exists())
             .values(
                 status="running",
                 leased_by=worker_id,

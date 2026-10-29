@@ -96,6 +96,66 @@ class Shot(Base):
     storyboard: Mapped[Storyboard] = relationship(back_populates="shots")
 
 
+class CreationPlan(Base):
+    __tablename__ = "creation_plans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    storyboard_id: Mapped[str] = mapped_column(ForeignKey("storyboards.id"), unique=True)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    recipe: Mapped[str] = mapped_column(String(30))
+    target_seconds: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    project: Mapped[Project] = relationship()
+    storyboard: Mapped[Storyboard] = relationship()
+
+
+class WritingDocument(Base):
+    __tablename__ = "writing_documents"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    idea: Mapped[str] = mapped_column(Text)
+    recipe: Mapped[str] = mapped_column(String(30))
+    target_seconds: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(10))
+    latest_version: Mapped[int] = mapped_column(Integer, default=0)
+    selected_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    project: Mapped[Project] = relationship()
+
+
+class WritingRevision(Base):
+    __tablename__ = "writing_revisions"
+    __table_args__ = (UniqueConstraint("document_id", "version", name="uq_writing_document_version"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("writing_documents.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    parent_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    body_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WritingPublication(Base):
+    __tablename__ = "writing_publications"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("writing_revisions.id"), unique=True)
+    creation_plan_id: Mapped[str] = mapped_column(ForeignKey("creation_plans.id"), unique=True)
+    confirmed_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ModelProfile(Base):
     __tablename__ = "model_profiles"
 

@@ -48,7 +48,7 @@ def test_local_setup_creates_first_admin_and_signs_in(tmp_path):
         follow_redirects=False,
     )
     assert created.status_code == 303
-    assert created.headers["location"] == "/"
+    assert created.headers["location"] == "/create"
     assert client.get("/").status_code == 200
 
     with app.state.database.session() as session:

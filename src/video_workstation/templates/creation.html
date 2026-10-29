@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.project.name }} · {{ state_label }}{% endblock %}
+{% block content %}
+<header class="page-header"><div><h1>{{ plan.project.name }}</h1><p>{{ recipe.name }} · {{ plan.target_seconds }} 秒 · {{ '横屏' if plan.aspect_ratio == '16:9' else '竖屏' }}</p></div><a class="text-link" href="/works">我的作品</a></header>
+<ol class="creation-steps" aria-label="制作步骤"><li>1 说明内容</li><li {% if plan.status == 'draft' %}aria-current="step"{% endif %}>2 确认分镜</li><li {% if plan.status not in ['draft', 'preview_ready'] %}aria-current="step"{% endif %}>3 自动制作</li><li {% if plan.status == 'preview_ready' %}aria-current="step"{% endif %}>4 预览和保存</li></ol>
+<h2>{{ state_label }}</h2>
+{% if error or plan.error_message %}<div class="creation-notice is-error" role="alert"><p>{{ error or plan.error_message }}</p></div>{% endif %}
+{% if plan.status == 'draft' %}
+<p class="creation-note">{{ recipe.hint }} AI 生成的画面无需上传视频，工作台会匹配已验证的模型。真实录屏、产品实拍或自己的口播才需要对应素材；也可以自愿导入已有视频。</p>
+<ol class="creation-shots">{% for choice in choices %}
+<li class="creation-shot" id="shot-{{ choice.shot.id }}">
+  <div class="creation-shot-heading"><h3>第 {{ choice.shot.sequence_no }} 段 · {{ choice.shot.title }}</h3><span>5 秒</span></div>
+  <p>{{ choice.shot.prompt }}</p>
+  <p class="creation-note"><strong>{{ choice.model_slug or ('已选真实视频' if choice.asset_id else ('需要真实素材' if choice.source == 'material' else 'AI 生成 · 等待模型验证')) }}</strong> · {{ choice.reason }}</p>
+  {% if choice.issue and choice.issue != choice.reason %}<p class="creation-issue">{{ choice.issue }}</p>{% endif %}
+  <details><summary>修改这段内容</summary><form method="post" action="/creations/{{ plan.id }}/shots/{{ choice.shot.id }}/edit" class="creation-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label class="wide">标题<input name="title" maxlength="200" required value="{{ choice.shot.title }}"></label><label class="wide">画面内容<textarea name="prompt" maxlength="20000" rows="3" required>{{ choice.shot.prompt }}</textarea></label><div class="wide"><button class="button button-secondary">保存这段内容</button></div>
+  </form></details>
+  {% if choice.asset_id %}<video controls preload="none" class="creation-video" src="/assets/{{ choice.asset_id }}/content" aria-label="第 {{ choice.shot.sequence_no }} 段素材预览"></video>{% endif %}
+  <details><summary>{{ '导入 / 更换真实视频' if choice.source == 'material' else '可选：使用已有视频替代 AI 生成' }}</summary>
+    <form method="post" action="/creations/{{ plan.id }}/shots/{{ choice.shot.id }}/video" enctype="multipart/form-data" class="creation-upload">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>选择本地视频（约 5 秒，保留声音）<input type="file" name="video" accept=".mp4,.mov,.webm" required></label><button class="button button-secondary" type="submit">导入并使用</button>
+    </form>
+    {% if choice.assets %}<form method="post" action="/creations/{{ plan.id }}/shots/{{ choice.shot.id }}/bind" class="creation-upload">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>使用该镜头已有素材<select name="asset_id"><option value="">取消素材，重新匹配模型</option>{% for asset in choice.assets %}<option value="{{ asset.id }}" {% if choice.asset_id == asset.id %}selected{% endif %}>{{ asset.metadata_json.get('original_filename', '镜头视频') }} · {{ asset.id[:8] }}</option>{% endfor %}</select></label><button class="button button-secondary" type="submit">应用选择</button>
+    </form>{% endif %}
+  </details>
+</li>{% endfor %}</ol>
+<div class="creation-notice"><p>“AI 生成 · 等待模型验证”表示无需上传素材，但需先通过对应视频档位的本机验证。“需要真实素材”才表示必须导入对应视频。所有段落就绪后才可开始制作。</p>{% if user.role == 'admin' %}<a class="text-link" href="/models">查看模型验证状态</a>{% else %}<p>模型验证由本机管理员在“帮助与设置 → 模型与准入”中完成。</p>{% endif %}</div>
+<form method="post" action="/creations/{{ plan.id }}/start" class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label><input type="checkbox" name="marketing_priority" value="true"> 营销任务优先制作</label><span>当前镜头完成后插队；普通作品自动续做。</span><button type="submit" class="button button-primary" {% if choices|selectattr('issue')|list %}disabled{% endif %}>确认并开始制作</button><span>确认后冻结本次内容，自动制作并合成。</span></form>
+{% else %}
+<p class="creation-note">关掉此页面后，本机后台仍会继续制作。当前为固定分镜版本；关闭工作台后台或电脑会中断正在执行的镜头。</p>
+{% if plan.snapshot_json.get('priority_lane') == 'marketing' %}<p class="creation-note">营销优先任务 · 若有正在生成的镜头，待该镜头完成后开始。</p>{% elif plan.snapshot_json.get('preempted_by') %}<p class="creation-notice">正在为营销任务让行。当前镜头完成后暂停后续派发，营销片结束后自动继续。</p>{% endif %}
+<ol class="creation-shots">{% for node in nodes %}{% set task = tasks_by_id.get(node.task_id) %}
+<li class="creation-shot"><div class="creation-shot-heading"><h3>第 {{ loop.index }} 段</h3><strong>{{ '素材已就绪' if node.asset_id else (task_labels.get(task.status, task.status) if task else '等待前一段') }}</strong></div><p>{{ node.prompt }}</p>{% if node.asset_id %}<video controls preload="none" class="creation-video" src="/assets/{{ node.asset_id }}/content" aria-label="第 {{ loop.index }} 段视频"></video>{% endif %}</li>
+{% endfor %}</ol>
+{% if delivery and plan.status == 'preview_ready' %}<section class="panel creation-delivery"><h2>成片已准备好</h2><video class="creation-video" controls preload="metadata" src="/assets/{{ delivery.id }}/content" aria-label="成片预览"></video><p><a class="button button-primary" href="/assets/{{ delivery.id }}/content?download=true">保存视频</a></p><p class="creation-note">本地合成为 H.264 / AAC。导出尺寸不代表模型原生清晰度。</p></section>{% endif %}
+<div class="creation-actions">
+  {% if plan.status == 'running' %}<form action="/creations/{{ plan.id }}/pause" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary">暂停后续制作</button></form><span>当前已排入队列的段落完成后暂停。</span>{% endif %}
+  {% if plan.status in ['paused', 'pause_requested'] %}<form action="/creations/{{ plan.id }}/pause" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="resume" value="true"><button class="button button-primary">继续制作</button></form>{% endif %}
+  <a class="button button-secondary" href="/creations/{{ plan.id }}">刷新进度</a>
+</div>
+{% endif %}
+<details class="creation-advanced"><summary>高级项目与维护</summary><p><a class="text-link" href="/projects/{{ plan.project_id }}">查看详细分镜、字幕导入与任务记录</a></p><p class="creation-note">运行期间请勿在高级界面重复提交同一镜头。</p></details>
+{% endblock %}
