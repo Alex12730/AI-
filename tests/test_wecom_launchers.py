@@ -8,6 +8,11 @@ def script(name: str) -> str:
     return (ROOT / "scripts" / name).read_text(encoding="utf-8-sig")
 
 
+def test_interactive_scripts_have_utf8_bom_for_windows_powershell_51():
+    for name in ("configure_wecom_alerts.ps1", "disable_wecom_alerts.ps1"):
+        assert (ROOT / "scripts" / name).read_bytes().startswith(b"\xef\xbb\xbf")
+
+
 def test_configuration_launcher_uses_hidden_prompt_and_never_accepts_webhook_argument():
     content = script("configure_wecom_alerts.ps1")
     assert "-m video_workstation.cli configure-wecom" in content
