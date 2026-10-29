@@ -68,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser("worker", help="运行单 GPU Worker")
     worker.add_argument("--once", action="store_true", help="只认领一个任务后退出")
     subparsers.add_parser("monitor-temperature", help="独立采集 GPU 温度并维护保护状态")
+    subparsers.add_parser("notify-wecom", help="独立发送企业微信温度提醒")
     subparsers.add_parser("configure-wecom", help="在本机加密配置企业微信温度提醒")
     subparsers.add_parser("test-wecom", help="发送企业微信连接测试消息")
     subparsers.add_parser("disable-wecom", help="停用并删除企业微信 Webhook 配置")
@@ -116,6 +117,10 @@ def main() -> None:
     if args.command == "monitor-temperature":
         from .thermal import run_thermal_monitor
         run_thermal_monitor(Settings())
+        return
+    if args.command == "notify-wecom":
+        from .wecom_notifier import run_wecom_notifier
+        run_wecom_notifier(Settings())
         return
     database = Database(Settings())
     database.create_schema()
