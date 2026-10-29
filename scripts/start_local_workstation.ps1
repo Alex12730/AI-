@@ -72,11 +72,18 @@ if (-not (Test-Path -LiteralPath (Join-Path $dataDirectory 'thermal-status.json'
 $wecomSecretPath = Join-Path $dataDirectory 'secrets/wecom-webhook.dpapi'
 $wecomConfigured = Test-Path -LiteralPath $wecomSecretPath
 if ($wecomConfigured) {
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $normalizedDataDirectory = [System.IO.Path]::GetFullPath($dataDirectory).TrimEnd('\').ToUpperInvariant()
+        $directoryHash = $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedDataDirectory))
+        $notifierInstanceId = -join ($directoryHash | ForEach-Object { $_.ToString('x2') })
+    } finally { $hasher.Dispose() }
+    $notifierPattern = 'video_workstation\.cli\s+notify-wecom\s+--instance-id\s+' + [regex]::Escape($notifierInstanceId)
     $notifierProcesses = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match 'video_workstation\.cli\s+notify-wecom'
+        $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match $notifierPattern
     })
     if (-not $notifierProcesses) {
-        $notifier = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'video_workstation.cli', 'notify-wecom') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'wecom.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'wecom.stderr.log')
+        $notifier = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'video_workstation.cli', 'notify-wecom', '--instance-id', $notifierInstanceId) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'wecom.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'wecom.stderr.log')
         $notifier.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'wecom.pid')
     }
 }

@@ -126,3 +126,46 @@ def test_public_status_contains_no_message_body_or_secret(tmp_path):
     serialized = json.dumps(status, ensure_ascii=False)
     assert "key=" not in serialized
     assert "高温预警" not in serialized
+
+
+def test_new_emergency_bypasses_an_ordinary_alert_waiting_for_retry(tmp_path):
+    sender = Sender(failures=1)
+    notifier = ThermalNotifier(tmp_path, sender)
+    notifier.tick(thermal(), NOW)
+    notifier.tick(thermal("warning", 81), NOW + timedelta(seconds=30))
+    sender.failures = 0
+
+    notifier.tick(thermal("emergency", 93), NOW + timedelta(seconds=31))
+
+    assert "紧急高温" in sender.messages[-1]
+    state = json.loads((tmp_path / "wecom-notifier-state.json").read_text(encoding="utf-8"))
+    assert [item["level"] for item in state["pending"]] == ["warning"]
+
+
+def test_outage_coalesces_repeated_levels_without_discarding_emergency(tmp_path):
+    sender = Sender(failures=100)
+    notifier = ThermalNotifier(tmp_path, sender)
+    notifier.tick(thermal(), NOW)
+    levels = ["warning", "cooldown", "emergency", "unavailable", "recovery_ready"]
+    for index in range(40):
+        level = levels[index % len(levels)]
+        notifier.tick(thermal(level, 93 if level == "emergency" else 81),
+                      NOW + timedelta(minutes=index + 1))
+
+    state = json.loads((tmp_path / "wecom-notifier-state.json").read_text(encoding="utf-8"))
+    pending_levels = [item["level"] for item in state["pending"]]
+    assert "emergency" in pending_levels
+    assert len(pending_levels) <= 7
+    assert len(pending_levels) == len(set(pending_levels))
+
+
+def test_outbox_is_persisted_before_network_delivery(tmp_path):
+    observed = []
+
+    def inspect_during_send(_content):
+        state = json.loads((tmp_path / "wecom-notifier-state.json").read_text(encoding="utf-8"))
+        observed.append([item["level"] for item in state["pending"]])
+
+    notifier = ThermalNotifier(tmp_path, inspect_during_send)
+    notifier.tick(thermal("emergency", 93), NOW)
+    assert observed == [["emergency"]]

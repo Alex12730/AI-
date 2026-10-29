@@ -11,7 +11,8 @@ from typing import Callable
 
 from .config import Settings
 from .thermal import acquire_monitor_lock, read_thermal_status
-from .wecom import WeComClient, WeComConfigurationError, WeComDeliveryError, load_wecom_webhook
+from .wecom import (SECRET_RELATIVE_PATH, WeComClient, WeComConfigurationError,
+                    WeComDeliveryError, load_wecom_webhook)
 
 
 STATE_FILE = "wecom-notifier-state.json"
@@ -109,20 +110,28 @@ class ThermalNotifier:
             return _new_state()
 
     def _enqueue(self, key: str, level: str, status: dict, now: datetime) -> None:
-        if any(item.get("key") == key for item in self.state["pending"]):
-            return
+        group = "emergency" if level in {"emergency", "emergency_repeat"} else level
+        for item in self.state["pending"]:
+            item_group = "emergency" if item.get("level") in {"emergency", "emergency_repeat"} else item.get("level")
+            if item_group == group:
+                item.update({"key": key, "level": level,
+                    "content": _message(level, status, self.workstation_name, now),
+                    "attempts": 0, "next_attempt_at": now.isoformat()})
+                return
         self.state["pending"].append({"key": key, "level": level,
             "content": _message(level, status, self.workstation_name, now),
             "attempts": 0, "next_attempt_at": now.isoformat()})
-        self.state["pending"] = self.state["pending"][-20:]
 
     def _deliver_one(self, now: datetime) -> None:
-        if not self.state["pending"]:
+        due = []
+        priorities = {"emergency": 0, "emergency_repeat": 0, "cooldown": 1, "warning": 2}
+        for index, candidate in enumerate(self.state["pending"]):
+            next_attempt = _parse_time(candidate.get("next_attempt_at"))
+            if next_attempt is None or now >= next_attempt:
+                due.append((priorities.get(candidate.get("level"), 3), index, candidate))
+        if not due:
             return
-        item = self.state["pending"][0]
-        next_attempt = _parse_time(item.get("next_attempt_at"))
-        if next_attempt is None or now < next_attempt:
-            return
+        _, index, item = min(due, key=lambda value: (value[0], value[1]))
         try:
             self.sender(item["content"])
         except WeComDeliveryError:
@@ -132,7 +141,7 @@ class ThermalNotifier:
             self.state["last_error"] = "企业微信消息发送失败，等待重试"
             self.state["last_error_at"] = now.isoformat()
             return
-        self.state["pending"].pop(0)
+        self.state["pending"].pop(index)
         self.state["last_success_at"] = now.isoformat()
         self.state["last_error"] = None
         if item["level"] in {"emergency", "emergency_repeat"}:
@@ -158,6 +167,7 @@ class ThermalNotifier:
                                     for item in self.state["pending"])
             if last_sent and (now - last_sent).total_seconds() >= 600 and not pending_emergency:
                 self._enqueue(f"emergency_repeat:{now.isoformat()}", "emergency_repeat", status, now)
+        _atomic_json(self.state_path, self.state)
         self._deliver_one(now)
         _atomic_json(self.state_path, self.state)
         _atomic_json(self.status_path, {"state": "retrying" if self.state["pending"] else "connected",
@@ -174,6 +184,8 @@ def run_wecom_notifier(settings: Settings, *, interval: float = 5) -> None:
             _atomic_json(settings.data_dir / STATUS_FILE, {"state": "disabled", "pending_count": 0,
                 "updated_at": datetime.now(timezone.utc).isoformat()})
             return
+        secret_path = settings.data_dir / SECRET_RELATIVE_PATH
+        secret_mtime = secret_path.stat().st_mtime_ns
         notifier = ThermalNotifier(settings.data_dir, WeComClient(webhook).send_markdown)
         while True:
             configured = load_wecom_webhook(settings.data_dir)
@@ -181,9 +193,11 @@ def run_wecom_notifier(settings: Settings, *, interval: float = 5) -> None:
                 _atomic_json(settings.data_dir / STATUS_FILE, {"state": "disabled", "pending_count": 0,
                     "updated_at": datetime.now(timezone.utc).isoformat()})
                 return
-            if configured != webhook:
+            current_mtime = secret_path.stat().st_mtime_ns
+            if configured != webhook or current_mtime != secret_mtime:
                 webhook = configured
-                notifier.sender = WeComClient(webhook).send_markdown
+                secret_mtime = current_mtime
+                notifier = ThermalNotifier(settings.data_dir, WeComClient(webhook).send_markdown)
             notifier.tick(read_thermal_status(settings.data_dir / "thermal-status.json"))
             time.sleep(interval)
     except WeComConfigurationError:

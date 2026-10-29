@@ -33,11 +33,12 @@ def validate_wecom_webhook(url: str) -> str:
     try:
         parsed = urllib.parse.urlsplit(value)
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+        port = parsed.port
     except (ValueError, TypeError):
         raise WeComConfigurationError("企业微信 Webhook 地址格式不正确") from None
     key = query.get("key", [])
     if (parsed.scheme != "https" or parsed.hostname != "qyapi.weixin.qq.com"
-        or parsed.username or parsed.password or parsed.port is not None
+        or parsed.username or parsed.password or port is not None
         or parsed.path != "/cgi-bin/webhook/send" or parsed.fragment
         or set(query) != {"key"} or len(key) != 1
         or not 16 <= len(key[0]) <= 128
@@ -94,6 +95,17 @@ def _secret_path(data_dir: Path) -> Path:
     return Path(data_dir).resolve() / SECRET_RELATIVE_PATH
 
 
+def _clear_notifier_delivery_state(data_dir: Path) -> None:
+    root = Path(data_dir).resolve()
+    for name in ("wecom-notifier-state.json", "wecom-notifier-status.json"):
+        try:
+            (root / name).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            raise WeComConfigurationError("企业微信通知状态无法重置") from None
+
+
 def save_wecom_webhook(data_dir: Path, url: str) -> Path:
     validated = validate_wecom_webhook(url)
     path = _secret_path(data_dir)
@@ -103,6 +115,7 @@ def save_wecom_webhook(data_dir: Path, url: str) -> Path:
     try:
         temporary.write_bytes(encrypted)
         os.replace(temporary, path)
+        _clear_notifier_delivery_state(data_dir)
     finally:
         temporary.unlink(missing_ok=True)
     return path
@@ -124,11 +137,14 @@ def load_wecom_webhook(data_dir: Path) -> str | None:
 
 def remove_wecom_webhook(data_dir: Path) -> bool:
     path = _secret_path(data_dir)
+    removed = False
     try:
         path.unlink()
-        return True
+        removed = True
     except FileNotFoundError:
-        return False
+        pass
+    _clear_notifier_delivery_state(data_dir)
+    return removed
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

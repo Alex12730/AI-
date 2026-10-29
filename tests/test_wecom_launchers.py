@@ -34,4 +34,6 @@ def test_workstation_detects_owned_notifier_without_putting_webhook_on_command_l
     content = script("start_local_workstation.ps1")
     assert "video_workstation\\.cli\\s+notify-wecom" in content
     assert "CommandLine.Contains($pythonPath)" in content
+    assert "--instance-id" in content
+    assert "$notifierInstanceId" in content
     assert "qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" not in content

@@ -44,6 +44,11 @@ def test_webhook_validation_normalizes_surrounding_whitespace():
     assert validate_wecom_webhook(f"  {VALID}\n") == VALID
 
 
+def test_webhook_validation_rejects_malformed_port_with_controlled_error():
+    with pytest.raises(WeComConfigurationError, match="企业微信"):
+        validate_wecom_webhook("https://qyapi.weixin.qq.com:abc/cgi-bin/webhook/send?key=abc1234567890123")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI storage")
 def test_webhook_is_dpapi_encrypted_at_rest_and_round_trips(tmp_path):
     saved = save_wecom_webhook(tmp_path, VALID)
@@ -54,6 +59,21 @@ def test_webhook_is_dpapi_encrypted_at_rest_and_round_trips(tmp_path):
     assert remove_wecom_webhook(tmp_path) is True
     assert load_wecom_webhook(tmp_path) is None
     assert remove_wecom_webhook(tmp_path) is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI storage")
+def test_save_and_remove_clear_stale_notifier_delivery_state(tmp_path):
+    for name in ("wecom-notifier-state.json", "wecom-notifier-status.json"):
+        (tmp_path / name).write_text("stale", encoding="utf-8")
+    save_wecom_webhook(tmp_path, VALID)
+    assert not (tmp_path / "wecom-notifier-state.json").exists()
+    assert not (tmp_path / "wecom-notifier-status.json").exists()
+
+    for name in ("wecom-notifier-state.json", "wecom-notifier-status.json"):
+        (tmp_path / name).write_text("stale", encoding="utf-8")
+    remove_wecom_webhook(tmp_path)
+    assert not (tmp_path / "wecom-notifier-state.json").exists()
+    assert not (tmp_path / "wecom-notifier-status.json").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI storage")
