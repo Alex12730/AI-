@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser("worker", help="运行单 GPU Worker")
     worker.add_argument("--once", action="store_true", help="只认领一个任务后退出")
     subparsers.add_parser("monitor-temperature", help="独立采集 GPU 温度并维护保护状态")
+    subparsers.add_parser("configure-wecom", help="在本机加密配置企业微信温度提醒")
+    subparsers.add_parser("test-wecom", help="发送企业微信连接测试消息")
+    subparsers.add_parser("disable-wecom", help="停用并删除企业微信 Webhook 配置")
     subparsers.add_parser("active-task-count", help="供启动器检查是否有正在运行的任务")
     stop_worker = subparsers.add_parser("stop-idle-worker", help="持有队列写锁时安全停止旧 Worker")
     stop_worker.add_argument("pid", type=int)
@@ -87,6 +90,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command in {"configure-wecom", "test-wecom", "disable-wecom"}:
+        from .wecom import (WeComClient, WeComConfigurationError, WeComDeliveryError,
+                            load_wecom_webhook, remove_wecom_webhook, save_wecom_webhook,
+                            validate_wecom_webhook)
+        settings = Settings()
+        try:
+            if args.command == "configure-wecom":
+                webhook = validate_wecom_webhook(getpass.getpass("请粘贴企业微信 Webhook（输入不会显示）: "))
+                WeComClient(webhook).send_markdown("**AI 视频工作台**\n> 企业微信温度提醒连接测试成功")
+                save_wecom_webhook(settings.data_dir, webhook)
+                print("企业微信温度提醒已配置，测试消息已发送。")
+            elif args.command == "test-wecom":
+                webhook = load_wecom_webhook(settings.data_dir)
+                if webhook is None:
+                    raise WeComConfigurationError("尚未配置企业微信温度提醒")
+                WeComClient(webhook).send_markdown("**AI 视频工作台**\n> 企业微信温度提醒连接测试成功")
+                print("企业微信测试消息已发送。")
+            else:
+                print("企业微信温度提醒已停用。" if remove_wecom_webhook(settings.data_dir)
+                      else "企业微信温度提醒尚未配置。")
+        except (WeComConfigurationError, WeComDeliveryError) as exc:
+            raise SystemExit(str(exc)) from exc
+        return
     if args.command == "monitor-temperature":
         from .thermal import run_thermal_monitor
         run_thermal_monitor(Settings())
