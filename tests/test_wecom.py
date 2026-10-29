@@ -130,6 +130,14 @@ def test_client_rejects_non_success_responses_without_leaking_webhook(payload):
     assert "key=" not in str(raised.value)
 
 
+def test_client_reports_safe_numeric_wecom_error_code():
+    with pytest.raises(WeComDeliveryError, match="93000") as raised:
+        WeComClient(VALID, opener=RecordingOpener(
+            {"errcode": 93000, "errmsg": f"invalid webhook {VALID}"}
+        )).send_markdown("test")
+    assert "key=" not in str(raised.value)
+
+
 def test_client_hides_transport_error_and_webhook():
     error = urllib.error.URLError(f"failed to connect to {VALID}")
     with pytest.raises(WeComDeliveryError, match="发送失败") as raised:

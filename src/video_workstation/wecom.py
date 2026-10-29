@@ -170,7 +170,9 @@ class WeComClient:
                 raw = response.read()
             payload = json.loads(raw.decode("utf-8"))
             if not isinstance(payload, dict) or payload.get("errcode") != 0:
-                raise WeComDeliveryError("企业微信未接受消息")
+                error_code = payload.get("errcode") if isinstance(payload, dict) else None
+                code_suffix = f"（错误码：{error_code}）" if type(error_code) is int else ""
+                raise WeComDeliveryError(f"企业微信未接受消息{code_suffix}")
         except WeComDeliveryError:
             raise
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError,
