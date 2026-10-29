@@ -1,7 +1,13 @@
 ﻿[CmdletBinding()]
-param([string]$FFmpegDirectory)
+param(
+    [string]$FFmpegDirectory,
+    [string]$ListenAddress = '127.0.0.1'
+)
 
 $ErrorActionPreference = 'Stop'
+if (@('127.0.0.1', '0.0.0.0') -notcontains $ListenAddress) {
+    throw '监听地址只允许 127.0.0.1 或 0.0.0.0。'
+}
 $startupMutex = [System.Threading.Mutex]::new($false, 'Local\AIVideoWorkstationStartup')
 $startupLock = $false
 try {
@@ -105,14 +111,16 @@ function Assert-NoRunningTask {
     }
 }
 $webReady = $false
+$webProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match 'uvicorn\s+video_workstation\.main:application'
+})
+$listenPattern = '--host\s+' + [regex]::Escape($ListenAddress) + '(\s|$)'
+$matchingWebProcess = @($webProcesses | Where-Object { $_.CommandLine -match $listenPattern }).Count -gt 0
 try {
     $health = Get-LocalHealth
-    $webReady = $health.status -eq 'ok' -and $health.thermal_monitor_enabled -eq $true -and $health.runtime_version -eq 5
+    $webReady = $health.status -eq 'ok' -and $health.thermal_monitor_enabled -eq $true -and $health.runtime_version -eq 5 -and $matchingWebProcess
 } catch {}
 if (-not $webReady) {
-    $webProcesses = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match 'uvicorn\s+video_workstation\.main:application'
-    })
     if ($webProcesses.Count -gt 0) {
         Assert-NoRunningTask
         foreach ($oldWeb in $webProcesses) { Stop-OwnedTree $oldWeb.ProcessId }
@@ -121,7 +129,7 @@ if (-not $webReady) {
 }
 if (-not $webReady) {
     if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) { throw '8000 端口已被其他服务占用。' }
-    $web = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'uvicorn', 'video_workstation.main:application', '--factory', '--host', '127.0.0.1', '--port', '8000') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'web.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'web.stderr.log')
+    $web = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'uvicorn', 'video_workstation.main:application', '--factory', '--host', $ListenAddress, '--port', '8000') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'web.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'web.stderr.log')
     $web.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'web.pid')
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Seconds 1
@@ -168,6 +176,21 @@ if (-not $workerProcesses) {
     $worker.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'worker.pid')
 }
 Write-Output '工作站：http://127.0.0.1:8000；首次使用在 /setup 建立工作账号。'
+if ($ListenAddress -eq '0.0.0.0') {
+    $lanConfiguration = Get-NetIPConfiguration | Where-Object {
+        $_.IPv4Address -and $_.NetAdapter.Status -eq 'Up' -and $_.IPv4DefaultGateway
+    } | Select-Object -First 1
+    if ($lanConfiguration) {
+        $lanAddress = $lanConfiguration.IPv4Address.IPAddress
+        $networkProfile = Get-NetConnectionProfile -InterfaceIndex $lanConfiguration.InterfaceIndex -ErrorAction SilentlyContinue
+        Write-Output "局域网入口：http://${lanAddress}:8000（同一路由器或 Wi-Fi）"
+        if (-not $networkProfile -or $networkProfile.NetworkCategory -notin @('Private', 'DomainAuthenticated')) {
+            Write-Warning '当前网络不是专用网络；请先运行 scripts/enable_lan_access.ps1。'
+        }
+    } else {
+        Write-Warning '未找到可用的局域网 IPv4 地址。'
+    }
+}
 Write-Output '模型引擎：http://127.0.0.1:8188；需要单独保持 ComfyUI 运行。'
 Write-Output '温度监测：后台每五秒采样；高温或监测失联时暂停派发新重型任务。'
 if ($wecomConfigured) {

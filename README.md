@@ -92,6 +92,30 @@ Set-Location D:\workspace\AI视频自动化工作流任务
 
 通知运行状态保存在数据目录的 `wecom-notifier-status.json`，运行日志位于 `service-logs/wecom.stdout.log` 与 `service-logs/wecom.stderr.log`。状态文件和日志不包含 Webhook 或消息正文。
 
+### 同一路由器或 Wi-Fi 访问
+
+主机首次启用时，以管理员身份运行：
+
+```powershell
+.\scripts\enable_lan_access.ps1
+```
+
+脚本只把当前正在联网的 WLAN/以太网设为“专用网络”，并创建一条由本项目命名和管理的入站规则：`Private + LocalSubnet + TCP 8000`。它不会开放 ComfyUI 8188、数据库、文件共享端口或公网访问。日常局域网启动使用：
+
+```powershell
+.\scripts\start_lan_workstation.ps1 -FFmpegDirectory "本机 FFmpeg bin 目录"
+```
+
+启动信息会显示实际局域网地址。其他电脑必须连接同一路由器或 Wi-Fi，在浏览器打开该地址并使用已有工作账号登录。首个账号初始化 `/setup` 仍只允许在主机通过 `127.0.0.1` 完成；匿名用户不能查看作品或提交任务。
+
+关闭局域网入站规则时运行：
+
+```powershell
+.\scripts\disable_lan_access.ps1
+```
+
+关闭规则不会停止主机上的制作任务，本机仍可使用 `http://127.0.0.1:8000`。本功能不配置路由器端口转发，也不适用于互联网异地访问。
+
 ## 本地合成与字幕
 
 先确认 `ffmpeg` 和 `ffprobe` 已加入 PATH：
