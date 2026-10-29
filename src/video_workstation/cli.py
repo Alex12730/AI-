@@ -3,18 +3,60 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
 from sqlalchemy import select
 
-from .config import Settings
+from .config import RUNTIME_VERSION, Settings
 from .db import Database
 from .models import ModelProfile
 from .services.models import configure_local_profile, record_benchmark, seed_model_profiles
 from .services.projects import bootstrap_admin
 from .services.workers import touch_worker
 from .worker import Worker
+
+
+def stop_idle_worker(database: Database, pid: int) -> None:
+    if os.name != "nt" or not database.settings.database_url.startswith("sqlite") or pid <= 0:
+        raise RuntimeError("此命令仅支持本机 Windows SQLite 工作站")
+    marker = database.settings.data_dir / "service-logs" / "worker-runtime.json"
+    try:
+        marker_info = json.loads(marker.read_text(encoding="utf-8"))
+        if type(marker_info.get("pid")) is not int or marker_info["pid"] != pid:
+            raise ValueError("Worker PID 与当前数据目录不匹配")
+    except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+        raise RuntimeError("不能确认旧 Worker 属于当前工作站，已拒绝停止") from exc
+    executable = str(Path(sys.executable)).replace("'", "''")
+    identity_script = (
+        f"$p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; "
+        "$parent=if ($p) { Get-CimInstance Win32_Process -Filter \"ProcessId=$($p.ParentProcessId)\" }; "
+        f"$ownedPath=($p -and $p.CommandLine.IndexOf('{executable}',[StringComparison]::OrdinalIgnoreCase) -ge 0) "
+        f"-or ($parent -and $parent.CommandLine.IndexOf('{executable}',[StringComparison]::OrdinalIgnoreCase) -ge 0); "
+        "if ($ownedPath -and $p.CommandLine -match 'video_workstation\\.cli\\s+worker') { 'OWNED' }"
+    )
+    identity = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", identity_script],
+                              capture_output=True, text=True, check=False)
+    if identity.returncode != 0 or identity.stdout.strip() != "OWNED":
+        raise RuntimeError("目标进程不是当前工作站的 Worker，已拒绝停止")
+    # BEGIN IMMEDIATE serializes with QueueService.claim_next. The old Worker
+    # cannot claim a new task between the idle check and process termination.
+    with database.engine.connect() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            from .models import Task
+            running = connection.execute(select(Task.id).where(Task.status == "running")).first()
+            if running is not None:
+                raise RuntimeError("还有正在运行的镜头，旧 Worker 保持运行；请稍后重试。")
+            result = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                                    capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError(f"无法停止旧 Worker PID {pid}: {result.stderr.strip()}")
+        finally:
+            connection.rollback()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     admin.add_argument("username")
     worker = subparsers.add_parser("worker", help="运行单 GPU Worker")
     worker.add_argument("--once", action="store_true", help="只认领一个任务后退出")
+    subparsers.add_parser("monitor-temperature", help="独立采集 GPU 温度并维护保护状态")
+    subparsers.add_parser("active-task-count", help="供启动器检查是否有正在运行的任务")
+    stop_worker = subparsers.add_parser("stop-idle-worker", help="持有队列写锁时安全停止旧 Worker")
+    stop_worker.add_argument("pid", type=int)
     configure = subparsers.add_parser("configure-model", help="登记本地模型命令数组")
     configure.add_argument("slug")
     configure.add_argument("--command-json", required=True, type=Path)
@@ -41,10 +87,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "monitor-temperature":
+        from .thermal import run_thermal_monitor
+        run_thermal_monitor(Settings())
+        return
     database = Database(Settings())
     database.create_schema()
     with database.session() as session:
         seed_model_profiles(session)
+    if args.command == "active-task-count":
+        from .models import Task
+        with database.session() as session:
+            print(len(list(session.scalars(select(Task.id).where(Task.status == "running")))))
+        return
+    if args.command == "stop-idle-worker":
+        try:
+            stop_idle_worker(database, args.pid)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        print(f"已安全停止空闲 Worker PID {args.pid}")
+        return
     if args.command == "init-db":
         print("数据库已初始化")
         return
@@ -59,6 +121,11 @@ def main() -> None:
         return
     if args.command == "worker":
         worker = Worker(database.settings.worker_id, settings=database.settings)
+        marker = database.settings.data_dir / "service-logs" / "worker-runtime.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"pid": os.getpid(),
+            "thermal_monitor_enabled": database.settings.thermal_monitor_enabled,
+            "runtime_version": RUNTIME_VERSION}), encoding="utf-8")
         try:
             while True:
                 with database.session() as session:
@@ -72,6 +139,12 @@ def main() -> None:
                 touch_worker(session, database.settings.worker_id, "stopped")
             print("Worker 已停止")
             return
+        finally:
+            try:
+                if json.loads(marker.read_text(encoding="utf-8")).get("pid") == os.getpid():
+                    marker.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                pass
     if args.command == "configure-model":
         command = json.loads(args.command_json.read_text(encoding="utf-8"))
         if not isinstance(command, list):

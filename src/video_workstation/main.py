@@ -17,9 +17,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from .config import Settings
+from .config import RUNTIME_VERSION, Settings
 from .db import Database
-from .models import Asset, AuditLog, ModelProfile, Project, Review, Shot, Storyboard, Task, User
+from .models import Asset, AuditLog, CreationPlan, ModelProfile, Project, Review, Shot, Storyboard, Task, User
 from .offline import validate_offline_profile
 from .queue import QueueService
 from .security import PasswordService
@@ -62,7 +62,12 @@ PACKAGE_DIR = Path(__file__).parent
 
 
 def status_context(request: Request) -> dict:
-    return {"system_summary": getattr(request.app.state, "system_status_summary", {"level": "unavailable", "label": "状态未检查"})}
+    from .thermal import read_thermal_status
+    settings = request.app.state.settings
+    thermal = (read_thermal_status(settings.data_dir / "thermal-status.json")
+               if settings.thermal_monitor_enabled else {"level": "disabled", "message": "温度监测未启用", "temperature_c": None})
+    return {"system_summary": getattr(request.app.state, "system_status_summary", {"level": "unavailable", "label": "状态未检查"}),
+            "thermal": thermal}
 
 
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"), context_processors=[status_context])
@@ -240,7 +245,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "mode": "local-only"}
+        return {"status": "ok", "mode": "local-only", "thermal_monitor_enabled": settings.thermal_monitor_enabled,
+                "runtime_version": RUNTIME_VERSION}
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -789,6 +795,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_admin(user)
         return refresh_system_status(request, session).to_dict()
 
+    @app.get("/api/thermal/status")
+    def api_thermal_status(user: User = Depends(current_user)):
+        from .thermal import read_thermal_status
+        if not settings.thermal_monitor_enabled:
+            return {"level": "disabled", "locked": False, "temperature_c": None,
+                    "message": "温度监测未启用", "monitor_enabled": False}
+        return read_thermal_status(settings.data_dir / "thermal-status.json") | {"monitor_enabled": True}
+
+    @app.post("/api/thermal/resume")
+    def api_thermal_resume(user: User = Depends(current_user), session: Session = Depends(session_dependency)):
+        from .thermal import request_thermal_resume
+        if session.scalar(select(Task.id).where(Task.status == "running").limit(1)) is not None:
+            raise HTTPException(409, "当前任务仍在运行，请先等待或检查任务")
+        if not request_thermal_resume(settings):
+            raise HTTPException(409, "温度尚未满足人工恢复条件")
+        return {"status": "requested", "message": "已请求继续；监测服务确认后恢复新任务派发"}
+
     @app.get("/api/projects")
     def api_projects(user: User = Depends(current_user), session: Session = Depends(session_dependency)):
         projects = list(session.scalars(select(Project).order_by(Project.updated_at.desc())))
@@ -980,6 +1003,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assert_project_access(user, project)
         return task
 
+    def guided_plan_for_task(task: Task, session: Session) -> CreationPlan | None:
+        parts = (task.idempotency_key or "").split(":")
+        if len(parts) != 3 or parts[0] != "creation":
+            return None
+        plan = session.get(CreationPlan, parts[1])
+        if plan is None or plan.project_id != task.project_id:
+            return None
+        snap = plan.snapshot_json or {}
+        linked = [node.get("task_id") for node in snap.get("nodes", [])] + [snap.get("compose_task_id")]
+        return plan if task.id in linked else None
+
     @app.post("/api/tasks/{task_id}/cancel")
     def api_cancel_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
         task = load_task_with_access(task_id, user, session)
@@ -993,20 +1027,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/tasks/{task_id}/pause")
     def api_pause_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
         task = load_task_with_access(task_id, user, session)
+        plan = guided_plan_for_task(task, session)
         try:
             QueueService(session).pause(task)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        if plan is not None and plan.status in {"running", "pause_requested"}:
+            plan.status = "paused"
+            plan.snapshot_json = {**plan.snapshot_json, "manual_task_pause_id": task.id}
         session.add(AuditLog(actor_id=user.id, action="task.pause", entity_type="task", entity_id=task.id))
         return {"id": task.id, "status": task.status}
 
     @app.post("/api/tasks/{task_id}/resume")
     def api_resume_task(task_id: str, user: User = Depends(current_user), session: Session = Depends(session_dependency)):
         task = load_task_with_access(task_id, user, session)
+        plan = guided_plan_for_task(task, session)
+        if plan is not None and task.id in (
+            set(plan.snapshot_json.get("scheduler_paused_task_ids", []))
+            | set(plan.snapshot_json.get("plan_paused_task_ids", []))
+        ):
+            raise HTTPException(409, "此镜头由作品队列暂停，请在作品页继续制作")
         try:
             QueueService(session).resume(task)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        if plan is not None and plan.status == "paused" and plan.snapshot_json.get("manual_task_pause_id") == task.id:
+            snap = dict(plan.snapshot_json)
+            snap.pop("manual_task_pause_id", None)
+            plan.snapshot_json = snap
+            plan.status = "running"
         session.add(AuditLog(actor_id=user.id, action="task.resume", entity_type="task", entity_id=task.id))
         return {"id": task.id, "status": task.status}
 

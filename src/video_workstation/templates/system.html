@@ -3,6 +3,21 @@
 {% block content %}
 <header class="page-header"><div><h1>运行状态</h1><p>只展示当前机器能够证明的资源、Worker 与模型准备度。</p></div><span class="status-line"><i class="status-dot status-{{ system_summary.level }}"></i>{{ system_summary.label }}</span></header>
 {% if status.alerts %}<section class="alert-stack" aria-label="当前告警">{% for alert in status.alerts %}<div class="alert alert-{{ alert.severity }}"><strong>{{ '严重' if alert.severity == 'critical' else '警告' }}</strong><span>{{ alert.message }}</span></div>{% endfor %}</section>{% endif %}
+<section class="panel thermal-panel" aria-label="持续温度监测">
+  <div class="panel-heading"><div><h2>持续温度监测</h2><p>独立进程每 5 秒采样；监测失联时暂停新的重型任务</p></div></div>
+  <div class="thermal-panel-body">
+    <p><strong data-thermal-detail>{{ thermal.temperature_c ~ '℃' if thermal.temperature_c is not none else '温度未知' }}</strong> <span data-thermal-detail-message>{{ thermal.message }}</span></p>
+    <p>当日最高：<strong data-thermal-daily-max>{{ thermal.daily_max_c ~ '℃' if thermal.daily_max_c is defined and thermal.daily_max_c is not none else '暂无数据' }}</strong>。当前任务不会因温度保护被自动终止；紧急高温请人工检查正在运行的任务。</p>
+    <div class="thermal-chart-wrap"><strong>最近一小时温度趋势</strong><svg data-thermal-chart viewBox="0 0 720 100" role="img" aria-label="最近一小时 GPU 温度；缺少读数的时间段留空"></svg><small>纵向范围 30–100℃；缺少读数的时间段留空。</small></div>
+    <button type="button" class="button button-secondary" data-thermal-resume data-csrf="{{ csrf_token }}" {% if not thermal.recovery_ready %}disabled{% endif %}>温度恢复后继续制作</button>
+    <small data-thermal-sampled>最近采样：{{ thermal.last_sample_at if thermal.last_sample_at is defined else '暂无' }}</small>
+    {% if thermal.samples is defined and thermal.samples %}
+    <details><summary>最近温度记录</summary><div class="table-wrap"><table><thead><tr><th>采样时间</th><th>GPU 温度</th></tr></thead><tbody>
+      {% for sample in thermal.samples[-12:]|reverse %}<tr><td>{{ sample.at }}</td><td>{{ sample.temperature_c ~ '℃' if sample.temperature_c is not none else '读取失败' }}</td></tr>{% endfor %}
+    </tbody></table></div></details>
+    {% endif %}
+  </div>
+</section>
 <section class="system-grid" aria-label="工作站状态卡片">
   <article class="metric-card"><span>GPU</span>{% if status.gpu.data %}{% for gpu in status.gpu.data %}<strong>{{ gpu.name }}</strong><small>{{ gpu.utilization_percent }}% 负载 · {{ gpu.temperature_c }}℃</small><small>{{ gpu.memory_used_mib }} / {{ gpu.memory_total_mib }} MiB</small>{% endfor %}{% else %}<strong>无法获取</strong><small>{{ status.gpu.error }}</small>{% endif %}</article>
   <article class="metric-card"><span>任务队列</span><strong>{{ status.queue.queued }} 等待 / {{ status.queue.running }} 运行</strong><small>{{ status.queue.succeeded }} 成功 · {{ status.queue.terminal_failed }} 终止失败</small></article>

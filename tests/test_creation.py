@@ -6,6 +6,7 @@ from sqlalchemy import select
 from video_workstation.config import Settings
 from video_workstation.db import Database
 from video_workstation.models import Asset, CreationPlan, ModelProfile, Task, User
+from video_workstation.queue import QueueService
 from video_workstation.services.creation import (
     RECIPES, advance_creations, create_guided_project, recommend_shot,
     start_creation, set_creation_paused,
@@ -109,6 +110,152 @@ def finish_video(session, task, settings):
     return asset
 
 
+def test_marketing_preempts_after_current_shot_and_resumes_normal_after_failure(setup):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        normal = new_plan(session, owner)
+        start_creation(session, actor, normal, settings)
+        normal_first = session.scalar(select(Task).where(Task.project_id == normal.project_id))
+        normal_first.status = "running"
+        first_marketing = new_plan(session, owner)
+        start_creation(session, actor, first_marketing, settings, marketing_priority=True)
+        second_marketing = new_plan(session, owner)
+        start_creation(session, actor, second_marketing, settings, marketing_priority=True)
+        assert session.scalar(select(Task.id).where(Task.project_id == second_marketing.project_id)) is None
+        first_marketing_task = session.scalar(select(Task).where(Task.project_id == first_marketing.project_id))
+        assert first_marketing_task.priority == -1 and normal_first.priority == 1
+        advance_creations(session, settings)
+        assert normal.snapshot_json["preempted_by"] == first_marketing.id
+        assert normal_first.status == "running"
+        finish_video(session, normal_first, settings)
+        advance_creations(session, settings)
+        assert len(list(session.scalars(select(Task).where(Task.project_id == normal.project_id)))) == 1
+        finish_video(session, first_marketing_task, settings)
+        advance_creations(session, settings)
+        marketing_second_shot = session.scalar(select(Task).where(Task.project_id == first_marketing.project_id,
+                                                                   Task.id != first_marketing_task.id))
+        assert marketing_second_shot.priority == -1
+        finish_video(session, marketing_second_shot, settings)
+        advance_creations(session, settings)
+        compose = session.scalar(select(Task).where(Task.project_id == first_marketing.project_id,
+                                                    Task.task_type == "compose_project"))
+        assert compose.priority == -1
+        compose.status = "succeeded"
+        session.add(Asset(project_id=compose.project_id, task_id=compose.id, kind="composite",
+                          path="not-read-in-this-state-test", metadata_json={"qc": {"passed": True}}))
+        session.flush()
+        advance_creations(session, settings)
+        assert first_marketing.status == "preview_ready"
+        second_task = session.scalar(select(Task).where(Task.project_id == second_marketing.project_id))
+        assert second_task is not None and second_task.priority == -1
+        assert normal.snapshot_json["preempted_by"] == second_marketing.id
+        second_task.status = "terminal_failed"
+        advance_creations(session, settings)
+        assert second_marketing.status == "failed"
+        assert "preempted_by" not in normal.snapshot_json
+        assert len(list(session.scalars(select(Task).where(Task.project_id == normal.project_id)))) == 2
+
+
+def test_normal_videos_finish_in_submission_order(setup):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        first = new_plan(session, owner)
+        start_creation(session, actor, first, settings)
+        second = new_plan(session, owner)
+        start_creation(session, actor, second, settings)
+        assert session.scalar(select(Task.id).where(Task.project_id == second.project_id)) is None
+        first_task = session.scalar(select(Task).where(Task.project_id == first.project_id))
+        finish_video(session, first_task, settings)
+        advance_creations(session, settings)
+        assert session.scalar(select(Task.id).where(Task.project_id == second.project_id)) is None
+        first_second_task = session.scalar(select(Task).where(Task.project_id == first.project_id,
+                                                               Task.id != first_task.id))
+        assert first_second_task is not None
+        finish_video(session, first_second_task, settings)
+        advance_creations(session, settings)
+        compose = session.scalar(select(Task).where(Task.project_id == first.project_id,
+                                                    Task.task_type == "compose_project"))
+        assert compose is not None
+        assert session.scalar(select(Task.id).where(Task.project_id == second.project_id)) is None
+        compose.status = "terminal_failed"
+        advance_creations(session, settings)
+        assert first.status == "failed"
+        assert session.scalar(select(Task.id).where(Task.project_id == second.project_id)) is not None
+
+
+def test_pausing_queued_shot_prevents_claim_until_user_resumes(setup):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        plan = new_plan(session, owner)
+        start_creation(session, actor, plan, settings, marketing_priority=True)
+        task = session.scalar(select(Task).where(Task.project_id == plan.project_id))
+        set_creation_paused(session, actor, plan, True)
+        assert plan.status == "paused" and task.status == "paused"
+        assert QueueService(session).claim_next("worker") is None
+        set_creation_paused(session, actor, plan, False)
+        assert plan.status == "running" and task.status == "queued"
+        assert QueueService(session).claim_next("worker").id == task.id
+
+
+@pytest.mark.parametrize("marketing", [False, True])
+def test_confirmation_order_wins_over_draft_creation_order(setup, marketing):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        older_draft = new_plan(session, owner)
+        newer_draft = new_plan(session, owner)
+        start_creation(session, actor, newer_draft, settings, marketing_priority=marketing)
+        start_creation(session, actor, older_draft, settings, marketing_priority=marketing)
+        assert session.scalar(select(Task.id).where(Task.project_id == newer_draft.project_id)) is not None
+        assert session.scalar(select(Task.id).where(Task.project_id == older_draft.project_id)) is None
+        advance_creations(session, settings)
+        assert session.scalar(select(Task.id).where(Task.project_id == older_draft.project_id)) is None
+
+
+def test_scheduler_does_not_override_manual_task_pause(setup):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        plan = new_plan(session, owner)
+        start_creation(session, actor, plan, settings)
+        task = session.scalar(select(Task).where(Task.project_id == plan.project_id))
+        QueueService(session).pause(task)
+        advance_creations(session, settings)
+        assert task.status == "paused"
+        assert QueueService(session).claim_next("worker") is None
+        QueueService(session).resume(task)
+        advance_creations(session, settings)
+        assert task.status == "queued"
+
+
+@pytest.mark.parametrize("marketing", [False, True])
+def test_manually_paused_shot_yields_queue_and_plan_resume_restores_it(setup, marketing):
+    db, settings, owner, _ = setup
+    with db.session() as session:
+        qualified(session, "wan-2.2")
+        actor = session.get(User, owner)
+        first = new_plan(session, owner)
+        start_creation(session, actor, first, settings, marketing_priority=marketing)
+        second = new_plan(session, owner)
+        start_creation(session, actor, second, settings, marketing_priority=marketing)
+        first_task = session.scalar(select(Task).where(Task.project_id == first.project_id))
+        QueueService(session).pause(first_task)
+        advance_creations(session, settings)
+        assert first.status == "paused" and first.snapshot_json["manual_task_pause_id"] == first_task.id
+        assert session.scalar(select(Task.id).where(Task.project_id == second.project_id)) is not None
+        set_creation_paused(session, actor, first, False)
+        assert first.status == "running" and first_task.status == "queued"
+        assert "manual_task_pause_id" not in first.snapshot_json
+
+
 def test_sequential_generation_pause_restart_and_explicit_composition(setup):
     db, settings, owner, _ = setup
     with db.session() as session:
@@ -200,8 +347,9 @@ def test_corrupt_snapshot_blocks_one_plan_without_stopping_others(setup):
         corrupt.snapshot_json = {"bindings": {}}
         healthy = new_plan(session, owner)
         start_creation(session, session.get(User, owner), healthy, settings)
-        finish_video(session, session.get(Task, healthy.snapshot_json["nodes"][0]["task_id"]), settings)
         advance_creations(session, settings)
         assert corrupt.status == "blocked"
+        finish_video(session, session.get(Task, healthy.snapshot_json["nodes"][0]["task_id"]), settings)
+        advance_creations(session, settings)
         assert healthy.status == "running"
         assert healthy.snapshot_json["nodes"][1]["task_id"]

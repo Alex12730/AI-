@@ -48,7 +48,9 @@ class Worker:
         queue = QueueService(session)
         touch_worker(session, self.worker_id, "idle")
         session.commit()
-        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds)
+        from .thermal import thermal_dispatch_allowed
+        allow_heavy = self.settings is None or thermal_dispatch_allowed(self.settings)
+        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds, allow_heavy=allow_heavy)
         if task is None:
             return False
         lease_token = task.lease_token

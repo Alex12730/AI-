@@ -29,9 +29,10 @@
   </details>
 </li>{% endfor %}</ol>
 <div class="creation-notice"><p>“AI 生成 · 等待模型验证”表示无需上传素材，但需先通过对应视频档位的本机验证。“需要真实素材”才表示必须导入对应视频。所有段落就绪后才可开始制作。</p>{% if user.role == 'admin' %}<a class="text-link" href="/models">查看模型验证状态</a>{% else %}<p>模型验证由本机管理员在“帮助与设置 → 模型与准入”中完成。</p>{% endif %}</div>
-<form method="post" action="/creations/{{ plan.id }}/start" class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="button button-primary" {% if choices|selectattr('issue')|list %}disabled{% endif %}>确认并开始制作</button><span>确认后冻结本次内容，自动制作并合成。</span></form>
+<form method="post" action="/creations/{{ plan.id }}/start" class="creation-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label><input type="checkbox" name="marketing_priority" value="true"> 营销任务优先制作</label><span>当前镜头完成后插队；普通作品自动续做。</span><button type="submit" class="button button-primary" {% if choices|selectattr('issue')|list %}disabled{% endif %}>确认并开始制作</button><span>确认后冻结本次内容，自动制作并合成。</span></form>
 {% else %}
 <p class="creation-note">关掉此页面后，本机后台仍会继续制作。当前为固定分镜版本；关闭工作台后台或电脑会中断正在执行的镜头。</p>
+{% if plan.snapshot_json.get('priority_lane') == 'marketing' %}<p class="creation-note">营销优先任务 · 若有正在生成的镜头，待该镜头完成后开始。</p>{% elif plan.snapshot_json.get('preempted_by') %}<p class="creation-notice">正在为营销任务让行。当前镜头完成后暂停后续派发，营销片结束后自动继续。</p>{% endif %}
 <ol class="creation-shots">{% for node in nodes %}{% set task = tasks_by_id.get(node.task_id) %}
 <li class="creation-shot"><div class="creation-shot-heading"><h3>第 {{ loop.index }} 段</h3><strong>{{ '素材已就绪' if node.asset_id else (task_labels.get(task.status, task.status) if task else '等待前一段') }}</strong></div><p>{{ node.prompt }}</p>{% if node.asset_id %}<video controls preload="none" class="creation-video" src="/assets/{{ node.asset_id }}/content" aria-label="第 {{ loop.index }} 段视频"></video>{% endif %}</li>
 {% endfor %}</ol>

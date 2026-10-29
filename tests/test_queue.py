@@ -87,6 +87,19 @@ def test_claim_uses_priority_aging_and_allows_only_one_running_task(database):
         assert QueueService(session).claim_next("worker-b", now=now, lease_seconds=60) is None
 
 
+def test_marketing_priority_stays_ahead_of_aged_normal_task(database):
+    now = datetime.now(timezone.utc)
+    with database.session() as session:
+        user, project, shot, profile = seed(session)
+        normal = add_task(session, user, project, shot, profile, priority=1,
+                          created_at=now - timedelta(hours=4))
+        marketing = add_task(session, user, project, shot, profile, priority=-1, created_at=now)
+        assert QueueService.effective_priority(normal, now) == 0
+        assert QueueService.effective_priority(marketing, now) == -1
+    with database.session() as session:
+        assert QueueService(session).claim_next("worker", now=now).id == marketing.id
+
+
 def test_expired_lease_is_recovered_without_duplicate_execution(database):
     now = datetime.now(timezone.utc)
     with database.session() as session:

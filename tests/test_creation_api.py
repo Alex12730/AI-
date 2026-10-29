@@ -144,6 +144,53 @@ def test_real_video_to_finished_delivery_with_existing_worker(tmp_path):
     assert client.post(f"/api/projects/{project_id}/compose", json={"asset_ids": ["x"], "aspect_ratio": "16:9"}).status_code == 403
 
 
+def test_advanced_task_pause_and_resume_updates_guided_plan(tmp_path):
+    from test_creation import qualified
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    url = create(client).headers["location"]
+    with app.state.database.session() as session:
+        qualified(session, "wan-2.2")
+    detail = client.get(url)
+    confirmed = client.post(url + "/start", data={"csrf_token": token(detail),
+                                                   "marketing_priority": "true"}, follow_redirects=False)
+    assert confirmed.status_code == 303
+    with app.state.database.session() as session:
+        plan = session.scalar(select(CreationPlan))
+        task_id = session.scalar(select(Task.id))
+        assert plan.snapshot_json["priority_lane"] == "marketing"
+    assert client.post(f"/api/tasks/{task_id}/pause").status_code == 200
+    with app.state.database.session() as session:
+        assert session.scalar(select(CreationPlan)).status == "paused"
+        assert session.get(Task, task_id).status == "paused"
+    assert client.post(f"/api/tasks/{task_id}/resume").status_code == 200
+    with app.state.database.session() as session:
+        assert session.scalar(select(CreationPlan)).status == "running"
+        assert session.get(Task, task_id).status == "queued"
+
+
+def test_task_api_cannot_bypass_guided_plan_pause(tmp_path):
+    from test_creation import qualified
+    client, app = make_client(tmp_path)
+    login(client, "member")
+    url = create(client).headers["location"]
+    with app.state.database.session() as session:
+        qualified(session, "wan-2.2")
+    detail = client.get(url)
+    assert client.post(url + "/start", data={"csrf_token": token(detail)}, follow_redirects=False).status_code == 303
+    with app.state.database.session() as session:
+        task_id = session.scalar(select(Task.id))
+    assert client.post(url + "/pause", data={"csrf_token": token(client.get(url))},
+                       follow_redirects=False).status_code == 303
+    assert client.post(f"/api/tasks/{task_id}/resume").status_code == 409
+    with app.state.database.session() as session:
+        assert session.get(Task, task_id).status == "paused"
+    assert client.post(url + "/pause", data={"csrf_token": token(client.get(url)), "resume": "true"},
+                       follow_redirects=False).status_code == 303
+    with app.state.database.session() as session:
+        assert session.get(Task, task_id).status == "queued"
+
+
 def test_draft_binding_cannot_overwrite_confirmed_snapshot(tmp_path):
     from video_workstation.creation_web import lock_creation
     from video_workstation.services.creation import start_creation

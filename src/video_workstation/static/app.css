@@ -22,6 +22,16 @@
 }
 
 .page-back-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+.thermal-strip { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; margin: 0 0 1.2rem; padding: .7rem 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--muted); font-size: .86rem; }
+.thermal-strip strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.thermal-strip a { margin-left: auto; color: var(--blue); }
+.thermal-warning, .thermal-checking { background: var(--amber-soft); color: #7d4205; }
+.thermal-cooldown, .thermal-emergency, .thermal-unavailable { background: var(--red-soft); color: #8f271d; }
+.thermal-panel-body { display: grid; gap: .7rem; justify-items: start; padding: 1.2rem; }
+.thermal-panel-body p { margin: 0; }
+.thermal-panel-body small { color: var(--muted); }
+.thermal-chart-wrap { width: min(100%, 900px); display: grid; gap: .35rem; }
+.thermal-chart-wrap svg { display: block; width: 100%; height: 140px; background: #f5f3ee; border: 1px solid var(--line); border-radius: 8px; }
 .eyebrow { margin: 0 0 .45rem !important; color: var(--amber) !important; font-size: .76rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .beginner-header { margin-bottom: 1.35rem; }
 .beginner-header h1 { font-size: clamp(2rem, 4vw, 3rem); }

@@ -182,7 +182,8 @@ def creation_choices(session: Session, plan: CreationPlan, settings: Settings) -
     return choices
 
 
-def start_creation(session: Session, actor: User, plan: CreationPlan, settings: Settings) -> None:
+def start_creation(session: Session, actor: User, plan: CreationPlan, settings: Settings,
+                   *, marketing_priority: bool = False) -> None:
     assert_plan_owner(actor, plan)
     # Write first to serialize concurrent confirmations before inspecting state.
     session.execute(update(CreationPlan).where(CreationPlan.id == plan.id).values(status=CreationPlan.status))
@@ -218,12 +219,18 @@ def start_creation(session: Session, actor: User, plan: CreationPlan, settings: 
         shot.status = "approved"
     plan.project.status = "approved"
     plan.snapshot_json = {"schema_version": 1, "storyboard_version": board.version,
+        "priority_lane": "marketing" if marketing_priority else "normal",
+        "submitted_at": now.isoformat(),
         "nodes": nodes, "compose_task_id": None, "bindings": plan.snapshot_json.get("bindings", {})}
     plan.status = "running"
     session.add(AuditLog(actor_id=actor.id, action="creation.confirm", entity_type="creation",
         entity_id=plan.id, details_json=copy.deepcopy(plan.snapshot_json)))
     session.flush()
-    _advance_one(session, plan, settings)
+    if (marketing_priority and _first_active_marketing(session).id == plan.id) or (
+        not marketing_priority and _first_active_marketing(session) is None
+        and _first_active_normal(session).id == plan.id
+    ):
+        _advance_one(session, plan, settings)
 
 
 def set_creation_paused(session: Session, actor: User, plan: CreationPlan, paused: bool):
@@ -231,9 +238,20 @@ def set_creation_paused(session: Session, actor: User, plan: CreationPlan, pause
     session.execute(update(CreationPlan).where(CreationPlan.id == plan.id).values(status=CreationPlan.status))
     session.refresh(plan)
     if paused and plan.status == "running":
-        plan.status = "pause_requested"
+        _set_queued_tasks_paused(session, plan, True, source="plan")
+        running = any(session.get(Task, task_id).status == "running" for task_id in _plan_task_ids(plan)
+                      if session.get(Task, task_id) is not None)
+        plan.status = "pause_requested" if running else "paused"
     elif not paused and plan.status in {"pause_requested", "paused"}:
         plan.status = "running"
+        _set_queued_tasks_paused(session, plan, False, source="plan")
+        snap = copy.deepcopy(plan.snapshot_json)
+        manual_task_id = snap.pop("manual_task_pause_id", None)
+        if manual_task_id:
+            task = session.get(Task, manual_task_id)
+            if task is not None and task.status == "paused":
+                task.status = "queued"
+            plan.snapshot_json = snap
     else:
         raise ValueError("当前阶段不能执行此操作")
     session.add(AuditLog(actor_id=actor.id, action="creation.pause" if paused else "creation.resume",
@@ -244,14 +262,125 @@ def advance_creations(session: Session, settings: Settings) -> None:
     # SQLite writes serialize competing schedulers, including a web confirmation.
     # Acquire the write transaction BEFORE reading plans to avoid stale snapshots.
     session.execute(update(CreationPlan).where(CreationPlan.status.in_(("running", "pause_requested"))).values(status=CreationPlan.status))
-    plans = list(session.scalars(select(CreationPlan).where(CreationPlan.status.in_(("running", "pause_requested"))).execution_options(populate_existing=True)))
-    for plan in plans:
+    plans = sorted(session.scalars(select(CreationPlan).where(CreationPlan.status.in_(("running", "pause_requested")))
+        .execution_options(populate_existing=True)), key=_submission_key)
+    marketing = [p for p in plans if p.snapshot_json.get("priority_lane") == "marketing"]
+    normal = [p for p in plans if p.snapshot_json.get("priority_lane") != "marketing"]
+    active_marketing = None
+    for index, plan in enumerate(marketing):
+        # A marketing work runs to completion before the next one starts.
+        manual_pause = _manually_paused_task_id(session, plan)
+        if manual_pause:
+            _mark_manual_pause(plan, manual_pause)
+            continue
+        _set_queued_tasks_paused(session, plan, False)
         try:
             _advance_one(session, plan, settings)
         except (ValueError, InsufficientStorage, OSError) as exc:
             plan.status = "blocked"
             plan.error_message = str(exc)
+        if plan.status in {"running", "pause_requested"}:
+            active_marketing = plan
+            for waiting in marketing[index + 1:]:
+                _set_queued_tasks_paused(session, waiting, True)
+            break
+    active_normal = None
+    for index, plan in enumerate(normal):
+        manual_pause = _manually_paused_task_id(session, plan)
+        if manual_pause:
+            _mark_manual_pause(plan, manual_pause)
+            continue
+        snap = copy.deepcopy(plan.snapshot_json)
+        if active_marketing is not None:
+            _set_queued_tasks_paused(session, plan, True)
+            if snap.get("preempted_by") != active_marketing.id:
+                snap["preempted_by"] = active_marketing.id
+                plan.snapshot_json = snap
+            continue
+        if snap.pop("preempted_by", None):
+            plan.snapshot_json = snap
+        if active_normal is not None:
+            _set_queued_tasks_paused(session, plan, True)
+            continue
+        _set_queued_tasks_paused(session, plan, False)
+        try:
+            _advance_one(session, plan, settings)
+        except (ValueError, InsufficientStorage, OSError) as exc:
+            plan.status = "blocked"
+            plan.error_message = str(exc)
+        if plan.status in {"running", "pause_requested"}:
+            active_normal = plan
+            for waiting in normal[index + 1:]:
+                _set_queued_tasks_paused(session, waiting, True)
     session.flush()
+
+
+def _first_active_marketing(session: Session) -> CreationPlan | None:
+    plans = sorted(session.scalars(select(CreationPlan).where(CreationPlan.status.in_(("running", "pause_requested")))),
+                   key=_submission_key)
+    return next((p for p in plans if p.snapshot_json.get("priority_lane") == "marketing"), None)
+
+
+def _first_active_normal(session: Session) -> CreationPlan | None:
+    plans = sorted(session.scalars(select(CreationPlan).where(CreationPlan.status.in_(("running", "pause_requested")))),
+                   key=_submission_key)
+    return next((p for p in plans if p.snapshot_json.get("priority_lane") != "marketing"), None)
+
+
+def _submission_key(plan: CreationPlan) -> tuple[str, str]:
+    timestamp = (plan.snapshot_json or {}).get("submitted_at")
+    if not timestamp:
+        timestamp = (plan.storyboard.approved_at or plan.created_at).isoformat()
+    return timestamp, plan.id
+
+
+def _plan_task_ids(plan: CreationPlan) -> list[str]:
+    snap = plan.snapshot_json or {}
+    return [task_id for task_id in ([node.get("task_id") for node in snap.get("nodes", [])]
+            + [snap.get("compose_task_id")]) if task_id]
+
+
+def _manually_paused_task_id(session: Session, plan: CreationPlan) -> str | None:
+    snap = plan.snapshot_json or {}
+    scheduler_owned = set(snap.get("scheduler_paused_task_ids", []))
+    plan_owned = set(snap.get("plan_paused_task_ids", []))
+    for task_id in _plan_task_ids(plan):
+        task = session.get(Task, task_id)
+        if task is not None and task.status == "paused" and task_id not in scheduler_owned | plan_owned:
+            return task_id
+    return None
+
+
+def _mark_manual_pause(plan: CreationPlan, task_id: str) -> None:
+    snap = copy.deepcopy(plan.snapshot_json)
+    snap["manual_task_pause_id"] = task_id
+    plan.snapshot_json = snap
+    plan.status = "paused"
+
+
+def _set_queued_tasks_paused(session: Session, plan: CreationPlan, paused: bool,
+                             *, source: str = "scheduler") -> None:
+    snap = copy.deepcopy(plan.snapshot_json)
+    key = f"{source}_paused_task_ids"
+    owned = set(snap.get(key, []))
+    if paused:
+        for task_id in _plan_task_ids(plan):
+            task = session.get(Task, task_id)
+            if task is not None and task.status == "queued":
+                task.status = "paused"
+                owned.add(task_id)
+    else:
+        for task_id in owned:
+            task = session.get(Task, task_id)
+            if task is not None and task.status == "paused":
+                task.status = "queued"
+        owned.clear()
+    if owned:
+        snap[key] = sorted(owned)
+    else:
+        snap.pop(key, None)
+    if snap != plan.snapshot_json:
+        plan.snapshot_json = snap
 
 
 def _advance_one(session: Session, plan: CreationPlan, settings: Settings):
@@ -296,7 +425,8 @@ def _advance_one(session: Session, plan: CreationPlan, settings: Settings):
             estimated = int(node["duration_seconds"] * 4 * 1024**3)
             StorageGuard(settings.asset_dir, minimum_free_bytes=settings.minimum_free_bytes).ensure_capacity(estimated_temp_bytes=estimated)
             task = Task(project_id=plan.project_id, shot_id=node["shot_id"], created_by_id=plan.created_by_id,
-                model_profile_id=profile.id, task_type="generate", status="queued", priority=1,
+                model_profile_id=profile.id, task_type="generate", status="queued",
+                priority=-1 if snap.get("priority_lane") == "marketing" else 1,
                 idempotency_key=key, model_version_snapshot=profile.model_version,
                 quantization_snapshot=profile.quantization, model_config_fingerprint=node["fingerprint"],
                 runtime_config_snapshot=copy.deepcopy(profile.runtime_config_json), estimated_temp_bytes=estimated)
@@ -333,7 +463,8 @@ def _advance_one(session: Session, plan: CreationPlan, settings: Settings):
         estimated = max(1, sum(Path(a.path).stat().st_size for a in assets) * 3)
         StorageGuard(settings.asset_dir, minimum_free_bytes=settings.minimum_free_bytes).ensure_capacity(estimated_temp_bytes=estimated)
         compose = Task(project_id=plan.project_id, created_by_id=plan.created_by_id,
-            task_type="compose_project", priority=1, idempotency_key=key,
+            task_type="compose_project", priority=-1 if snap.get("priority_lane") == "marketing" else 1,
+            idempotency_key=key,
             model_version_snapshot="ffmpeg-local", quantization_snapshot="not-applicable", estimated_temp_bytes=estimated)
         session.add(compose)
         session.flush()

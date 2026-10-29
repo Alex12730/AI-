@@ -46,6 +46,11 @@
       </div>
     </aside>
     <main id="main" class="workspace" tabindex="-1">
+      <div class="thermal-strip thermal-{{ thermal.level }}" data-thermal-strip role="status" aria-live="polite">
+        <strong data-thermal-temperature>{{ thermal.temperature_c ~ '℃' if thermal.temperature_c is not none else '温度未知' }}</strong>
+        <span data-thermal-message>{{ thermal.message }}</span>
+        {% if user.role == 'admin' %}<a href="/system">查看设备状态</a>{% endif %}
+      </div>
       <nav class="page-back-controls" aria-label="页面返回">
         <button type="button" class="button button-secondary" data-back-button>返回上一页</button>
         <a class="text-link" href="/create">返回开始制作</a>

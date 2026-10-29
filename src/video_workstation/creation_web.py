@@ -86,14 +86,15 @@ def register_creation_routes(app, *, settings, templates, session_dependency, ht
         return page(request, session, actor, owned(session, actor, plan_id))
 
     @app.post("/creations/{plan_id}/start")
-    def start_form(plan_id: str, request: Request, csrf_token: str = Form(...), session: Session = Depends(session_dependency)):
+    def start_form(plan_id: str, request: Request, csrf_token: str = Form(...),
+                   marketing_priority: bool = Form(False), session: Session = Depends(session_dependency)):
         actor = html_user(request, session)
         if actor is None:
             return RedirectResponse("/login", 303)
         validate_csrf(request, csrf_token)
         plan = owned(session, actor, plan_id)
         try:
-            start_creation(session, actor, plan, settings)
+            start_creation(session, actor, plan, settings, marketing_priority=marketing_priority)
             session.commit()
         except (ValueError, InsufficientStorage, OSError) as exc:
             session.rollback()
