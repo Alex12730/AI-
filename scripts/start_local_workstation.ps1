@@ -69,6 +69,17 @@ Start-Sleep -Seconds 1
 if (-not (Test-Path -LiteralPath (Join-Path $dataDirectory 'thermal-status.json'))) {
     Write-Warning '温度监测尚未产生读数；新重型任务会等待监测恢复。'
 }
+$wecomSecretPath = Join-Path $dataDirectory 'secrets/wecom-webhook.dpapi'
+$wecomConfigured = Test-Path -LiteralPath $wecomSecretPath
+if ($wecomConfigured) {
+    $notifierProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match 'video_workstation\.cli\s+notify-wecom'
+    })
+    if (-not $notifierProcesses) {
+        $notifier = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'video_workstation.cli', 'notify-wecom') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'wecom.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'wecom.stderr.log')
+        $notifier.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'wecom.pid')
+    }
+}
 function Get-LocalHealth {
     $healthRequest = [System.Net.WebRequest]::Create('http://127.0.0.1:8000/health')
     $healthRequest.Proxy = $null
@@ -152,6 +163,11 @@ if (-not $workerProcesses) {
 Write-Output '工作站：http://127.0.0.1:8000；首次使用在 /setup 建立工作账号。'
 Write-Output '模型引擎：http://127.0.0.1:8188；需要单独保持 ComfyUI 运行。'
 Write-Output '温度监测：后台每五秒采样；高温或监测失联时暂停派发新重型任务。'
+if ($wecomConfigured) {
+    Write-Output '企业微信提醒：已配置，后台通知进程已启动。'
+} else {
+    Write-Output '企业微信提醒：尚未配置；运行 scripts/configure_wecom_alerts.ps1 可启用。'
+}
 } finally {
     if ($startupLock) { $startupMutex.ReleaseMutex() }
     $startupMutex.Dispose()

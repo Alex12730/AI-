@@ -72,6 +72,26 @@ Set-Location D:\workspace\AI视频自动化工作流任务
 
 管理员登录后可访问 `http://127.0.0.1:8000/system`。这里的“已登记”“已配置”“已准入”是三个不同状态：只有当前配置指纹仍匹配本机基准记录的模型才显示为已准入；运行监控正常也不代表已经完成 A6000 生产验收。
 
+### 企业微信温度提醒
+
+工作台可把 GPU 高温预警、暂停新任务、紧急高温、恢复就绪和温度监测失联推送到企业微信群。温度监测和安全锁仍在本机独立运行；即使企业微信暂时无法联网，也不会影响本机高温保护。通知失败会按退避间隔重试，紧急高温持续期间最多每十分钟重复一次。
+
+首次配置时运行：
+
+```powershell
+.\scripts\configure_wecom_alerts.ps1
+```
+
+在隐藏输入提示中粘贴企业微信群机器人页面复制的完整 Webhook，然后按回车。程序会先发送测试消息，再用 Windows DPAPI 以当前 Windows 用户身份加密保存到运行数据目录；Webhook 不作为命令行参数传递，也不得写入仓库、文档或日志。以后使用正常工作台启动器即可，只有检测到加密配置时才会启动独立通知进程。
+
+需要停用时运行：
+
+```powershell
+.\scripts\disable_wecom_alerts.ps1
+```
+
+通知运行状态保存在数据目录的 `wecom-notifier-status.json`，运行日志位于 `service-logs/wecom.stdout.log` 与 `service-logs/wecom.stderr.log`。状态文件和日志不包含 Webhook 或消息正文。
+
 ## 本地合成与字幕
 
 先确认 `ffmpeg` 和 `ffprobe` 已加入 PATH：
