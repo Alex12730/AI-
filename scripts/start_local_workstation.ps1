@@ -111,19 +111,37 @@ function Assert-NoRunningTask {
     }
 }
 $webReady = $false
-$webProcesses = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.CommandLine -and $_.CommandLine.Contains($pythonPath) -and $_.CommandLine -match 'uvicorn\s+video_workstation\.main:application'
-})
-$listenPattern = '--host\s+' + [regex]::Escape($ListenAddress) + '(\s|$)'
-$matchingWebProcess = @($webProcesses | Where-Object { $_.CommandLine -match $listenPattern }).Count -gt 0
+$webHasher = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $normalizedWebDataDirectory = [System.IO.Path]::GetFullPath($dataDirectory).TrimEnd('\').ToUpperInvariant()
+    $webDirectoryHash = $webHasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedWebDataDirectory))
+    $webInstanceId = -join ($webDirectoryHash | ForEach-Object { $_.ToString('x2') })
+} finally { $webHasher.Dispose() }
+$webMarker = Join-Path $logDirectory 'web-runtime.json'
+$ownedWebProcess = $null
+$webRuntime = $null
+if (Test-Path -LiteralPath $webMarker) {
+    try {
+        $webRuntime = Get-Content -LiteralPath $webMarker -Raw -Encoding UTF8 | ConvertFrom-Json
+        $markerWebPid = 0
+        if ($webRuntime.instance_id -eq $webInstanceId -and [int]::TryParse([string]$webRuntime.pid, [ref]$markerWebPid) -and $markerWebPid -gt 0) {
+            $candidateWebProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$markerWebPid"
+            if ($candidateWebProcess -and $candidateWebProcess.CommandLine.Contains($pythonPath) -and $candidateWebProcess.CommandLine -match 'uvicorn\s+video_workstation\.main:application') {
+                $ownedWebProcess = $candidateWebProcess
+            }
+        }
+    } catch {}
+}
+$matchingWebProcess = $ownedWebProcess -and $webRuntime.listen_address -eq $ListenAddress
 try {
     $health = Get-LocalHealth
     $webReady = $health.status -eq 'ok' -and $health.thermal_monitor_enabled -eq $true -and $health.runtime_version -eq 5 -and $matchingWebProcess
 } catch {}
 if (-not $webReady) {
-    if ($webProcesses.Count -gt 0) {
+    if ($ownedWebProcess) {
         Assert-NoRunningTask
-        foreach ($oldWeb in $webProcesses) { Stop-OwnedTree $oldWeb.ProcessId }
+        Stop-OwnedTree $ownedWebProcess.ProcessId
+        Remove-Item -LiteralPath $webMarker -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
     }
 }
@@ -131,6 +149,7 @@ if (-not $webReady) {
     if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) { throw '8000 端口已被其他服务占用。' }
     $web = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'uvicorn', 'video_workstation.main:application', '--factory', '--host', $ListenAddress, '--port', '8000') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'web.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'web.stderr.log')
     $web.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'web.pid')
+    @{pid=$web.Id; instance_id=$webInstanceId; listen_address=$ListenAddress; runtime_version=5} | ConvertTo-Json -Compress | Set-Content -LiteralPath $webMarker -Encoding UTF8
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Seconds 1
         try {

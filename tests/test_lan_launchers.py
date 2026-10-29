@@ -19,7 +19,12 @@ def test_general_launcher_is_loopback_by_default_but_supports_explicit_lan_liste
     assert "[string]$ListenAddress = '127.0.0.1'" in content
     assert "@('127.0.0.1', '0.0.0.0')" in content
     assert "'--host', $ListenAddress" in content
-    assert "--host\\s+" in content and "$ListenAddress" in content
+    assert "listen_address=$ListenAddress" in content
+    assert "web-runtime.json" in content
+    assert "$webInstanceId" in content
+    assert "instance_id" in content
+    assert "[int]::TryParse" in content
+    assert "foreach ($oldWeb in $webProcesses)" not in content
 
 
 def test_daily_lan_launcher_explicitly_uses_all_interfaces_for_workstation_only():
@@ -39,6 +44,9 @@ def test_firewall_enable_rule_is_private_local_subnet_tcp_8000_only():
     assert "-Profile Private" in content
     assert "-RemoteAddress LocalSubnet" in content
     assert "Set-NetConnectionProfile" in content
+    assert "Get-NetRoute" in content
+    assert "HardwareInterface" in content
+    assert "bestCandidates.Count -ne 1" in content
     assert "-LocalPort 8188" not in content
     assert "-RemoteAddress Any" not in content
 
@@ -48,6 +56,11 @@ def test_firewall_disable_only_removes_the_owned_rule():
     disable = text("disable_lan_access.ps1")
     marker = "AI Video Workstation LAN TCP 8000"
     assert marker in enable and marker in disable
+    assert "AI.VideoWorkstation.LAN.TCP.8000" in enable
+    assert "AI.VideoWorkstation.LAN.TCP.8000" in disable
+    assert "Get-NetFirewallRule -Name $ruleName" in enable
+    assert "Get-NetFirewallRule -Name $ruleName" in disable
+    assert "New-NetFirewallRule -Name $ruleName" in enable
     assert "Remove-NetFirewallRule" in disable
     assert "-LocalPort 8188" not in disable
 
