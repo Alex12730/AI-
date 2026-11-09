@@ -27,6 +27,8 @@ def test_duration_prompt_and_portrait_reach_the_generation_graph(model, node, fr
         assert graph[node]['inputs']['prompt'] == 'literal {text}; $HOME'
         assert graph['115']['inputs']['aspect_ratio'] == '9:16 (Portrait Widescreen)'
         assert graph['140:129']['inputs']['noise_seed'] == 17
+        assert graph['140:137']['inputs']['value'] == 8
+        assert graph['140:139']['inputs']['value'] is True
     else:
         positive = '5' if model == 'wan-2.2' else '4'
         assert graph[positive]['inputs']['text'] == 'literal {text}; $HOME'
@@ -109,6 +111,14 @@ def test_invalid_durations_and_unsupported_h3_negative_prompt_fail_before_submis
                              preview=False, output_prefix='workstation/test')
 
 
+def test_h3_premium_keeps_the_supervised_50_step_base_preset():
+    graph = bridge().build_graph('minimax-h3-fl2va', prompt='ball', negative_prompt='',
+                                 duration=5, aspect_ratio='16:9', seed=1,
+                                 preview=False, output_prefix='workstation/test', quality='premium')
+    assert graph['140:137']['inputs']['value'] == 50
+    assert graph['140:139']['inputs']['value'] is False
+
+
 def test_workflow_edit_requires_reconfiguration():
     with pytest.raises(ValueError, match='Workflow changed'):
         bridge().build_graph('wan-2.2', prompt='ball', negative_prompt='', duration=5,
@@ -132,6 +142,7 @@ def test_configured_profiles_remain_unadmitted_and_repeated_setup_preserves_exis
         assert all(p.enabled and model_readiness(p) == 'configured' for p in profiles)
         command = profiles[0].runtime_config_json['command']
         assert '--preview' not in command
+        assert command[command.index('--quality') + 1] == 'standard'
         assert '--workflow-sha256' in command
         assert any('{prompt}' in arg for arg in command) and '{output}' in command
         profiles[0].validated_presets_json = [{'duration_seconds': 5, 'aspect_ratio': '16:9',
@@ -139,6 +150,29 @@ def test_configured_profiles_remain_unadmitted_and_repeated_setup_preserves_exis
         session.flush()
         repeated = deployment.configure_profiles(session, python=sys.executable, ffmpeg='ffmpeg')
         assert model_readiness(repeated[0]) == 'admitted'
+
+
+def test_bridge_only_safety_update_preserves_admitted_preset(tmp_path):
+    from video_workstation.config import Settings
+    from video_workstation.db import Database
+    from video_workstation.services.models import model_config_fingerprint, model_readiness
+    deployment = importlib.import_module('video_workstation.services.comfy_deployment')
+    db = Database(Settings(data_dir=tmp_path))
+    db.create_schema()
+    with db.session() as session:
+        profile = deployment.configure_profiles(session, python=sys.executable, ffmpeg='ffmpeg')[0]
+        profile.validated_presets_json = [{
+            'duration_seconds': 5, 'aspect_ratio': '16:9',
+            'config_fingerprint': model_config_fingerprint(profile),
+        }]
+        command = list(profile.runtime_config_json['command'])
+        command[command.index('--bridge-sha256') + 1] = '1' * 64
+        profile.runtime_config_json = {'command': command}
+        profile.model_version = profile.model_version.rsplit(' / ', 1)[0] + ' / ' + '1' * 64
+        profile.validated_presets_json[0]['config_fingerprint'] = model_config_fingerprint(profile)
+
+        updated = deployment.configure_profiles(session, python=sys.executable, ffmpeg='ffmpeg')[0]
+        assert model_readiness(updated) == 'admitted'
 
 
 def test_ffprobe_utf8_metadata_is_read_independently_of_windows_locale(tmp_path, monkeypatch):

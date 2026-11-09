@@ -107,6 +107,21 @@ def test_reconfiguration_invalidates_old_presets_and_string_booleans_are_rejecte
         record_benchmark(h3, 5, "16:9", [{"success": "false", "oom": False, "corrupt": False}] * 10)
 
 
+def test_benchmark_accepts_explicit_non_dialogue_av_sync_not_applicable(session):
+    seed_model_profiles(session)
+    h3 = session.query(ModelProfile).filter_by(slug="minimax-h3-fl2va").one()
+    runs = passing_runs()
+    for run in runs:
+        run.pop("av_sync_score")
+        run["av_sync_applicable"] = False
+        run["av_sync_reason"] = "ambient audio only; no speaking subject"
+    assert record_benchmark(h3, 5, "16:9", runs) is True
+
+    runs[0]["av_sync_reason"] = ""
+    with pytest.raises(ValueError, match="必须记录原因"):
+        record_benchmark(h3, 10, "16:9", runs)
+
+
 def test_demo_profile_syncs_all_eight_workflow_presets_without_reenabling(session):
     seed_model_profiles(session)
     demo = session.query(ModelProfile).filter_by(slug="demo").one()

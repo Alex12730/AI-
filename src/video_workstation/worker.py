@@ -18,6 +18,11 @@ from .services.models import model_config_fingerprint, video2x_is_admitted
 from .services.assets import register_video_asset
 from .services.workers import touch_worker
 from .storage import InsufficientStorage, StorageGuard, generated_asset_path
+from .thermal import thermal_dispatch_allowed
+
+
+class _ThermalTaskPause(RuntimeError):
+    pass
 
 
 class Worker:
@@ -48,9 +53,9 @@ class Worker:
         queue = QueueService(session)
         touch_worker(session, self.worker_id, "idle")
         session.commit()
-        from .thermal import thermal_dispatch_allowed
-        allow_heavy = self.settings is None or thermal_dispatch_allowed(self.settings)
-        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds, allow_heavy=allow_heavy)
+        if self.settings is not None and not thermal_dispatch_allowed(self.settings):
+            return False
+        task = queue.claim_next(self.worker_id, lease_seconds=self.lease_seconds, allow_heavy=True)
         if task is None:
             return False
         lease_token = task.lease_token
@@ -129,6 +134,8 @@ class Worker:
                 register_video_asset(session, task, result.output_path, qc)
                 result.metadata["qc"] = {"passed": True, "duration_seconds": qc.duration_seconds, "has_audio": qc.has_audio}
             queue.succeed(task, {"output_path": str(result.output_path), **result.metadata}, lease_token=lease_token)
+        elif result.error_class == "thermal_pause":
+            queue.defer_for_thermal(task, lease_token=lease_token)
         else:
             queue.fail(task, error_class=result.error_class or "infrastructure", message=result.error_message or "未知错误", lease_token=lease_token)
         touch_worker(session, self.worker_id, "idle")
@@ -161,7 +168,7 @@ class Worker:
         from .adapters.local_writer import LocalWriter,LocalWriterError
         from .models import WritingRevision
         from .services.writing import store_writing_candidate,WritingConflict,writer_is_ready
-        from .writer_deployment import file_sha256
+        from .writer_deployment import file_sha256,validate_writer_deployment
         from .writing_contracts import WritingBody,WritingRequest
         task=session.get(Task,task_id)
         try:
@@ -174,17 +181,26 @@ class Worker:
                 manifest_path=Path(runtime['writer_manifest'])
                 if not manifest_path.is_file() or file_sha256(manifest_path)!=runtime['manifest_sha256']:
                     raise LocalWriterError('本地写作部署清单已改变，请重新验证')
+                info=validate_writer_deployment(manifest_path)
                 if not writer_is_ready(profile):
                     raise LocalWriterError('本地写作模型尚未准备好，请重新验证')
                 request=WritingRequest.model_validate(task.payload_json['request'])
                 root=self.settings.data_dir if self.settings else Path('data').resolve()
+                work_dir = root/'writing-jobs'/task.id
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future=executor.submit(LocalWriter(manifest_path).generate,request,work_dir=root/'writing-jobs'/task.id)
+                    future=executor.submit(LocalWriter(manifest_path).generate,request,work_dir=work_dir)
                     while True:
                         try:
-                            body=future.result(timeout=self.heartbeat_seconds)
+                            body=future.result(timeout=min(self.heartbeat_seconds, 5))
                             break
                         except FutureTimeout:
+                            if self.settings and not thermal_dispatch_allowed(self.settings):
+                                cleanup_owned_engine(work_dir, info['exe_path'])
+                                try:
+                                    future.result(timeout=10)
+                                except Exception:
+                                    pass
+                                raise _ThermalTaskPause
                             session.refresh(task)
                             QueueService(session).heartbeat(task,self.worker_id,lease_token,lease_seconds=self.lease_seconds)
                             touch_worker(session,self.worker_id,'running',current_task_id=task.id)
@@ -199,6 +215,11 @@ class Worker:
             QueueService(session).succeed(task,{'revision_id':existing.id,'version':existing.version},lease_token=lease_token)
         except WritingConflict:
             session.rollback()
+        except _ThermalTaskPause:
+            session.rollback()
+            task=session.get(Task,task_id);session.refresh(task)
+            if task.status=='running' and task.lease_token==lease_token:
+                QueueService(session).defer_for_thermal(task,lease_token=lease_token)
         except Exception as exc:
             session.rollback()
             task=session.get(Task,task_id);session.refresh(task)
@@ -246,7 +267,10 @@ class Worker:
                 subtitle_path=Path(subtitle.path) if subtitle else None,
             )
             with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(execute_compose, request)
+                future = executor.submit(
+                    execute_compose, request,
+                    cancel_check=(lambda: not thermal_dispatch_allowed(self.settings)) if self.settings else None,
+                )
                 while True:
                     try:
                         result = future.result(timeout=self.heartbeat_seconds)
@@ -271,7 +295,9 @@ class Worker:
 
         task = session.get(Task, task_id)
         queue = QueueService(session)
-        if not result.success:
+        if result.error_class == "thermal_pause":
+            queue.defer_for_thermal(task, lease_token=lease_token)
+        elif not result.success:
             queue.fail(task, error_class=result.error_class or "infrastructure", message=result.error_message or "本地合成失败", lease_token=lease_token)
         else:
             expected_duration = float(result.metadata.get("expected_duration") or payload.get("expected_duration") or 0)
@@ -371,6 +397,7 @@ class Worker:
                     Path(source.path),
                     output_path,
                     scale=int(payload.get("scale", 2)),
+                    cancel_check=(lambda: not thermal_dispatch_allowed(self.settings)) if self.settings else None,
                 )
                 while True:
                     try:
@@ -395,7 +422,9 @@ class Worker:
             return True
         task = session.get(Task, task_id)
         queue = QueueService(session)
-        if not result.success:
+        if result.error_class == "thermal_pause":
+            queue.defer_for_thermal(task, lease_token=lease_token)
+        elif not result.success:
             queue.fail(task, error_class=result.error_class or "infrastructure", message=result.error_message or "Video2X 执行失败", lease_token=lease_token)
         else:
             qc = probe_media(result.output_path, expected_duration=float(payload.get("expected_duration") or 0))

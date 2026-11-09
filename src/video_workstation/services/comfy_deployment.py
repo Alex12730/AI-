@@ -1,6 +1,7 @@
 """Register reproducible ComfyUI commands without admitting untested presets."""
 import hashlib
 from pathlib import Path
+import re
 
 from ..adapters.comfyui import ComfyClient, MODELS, WORKFLOWS
 from .models import configure_local_profile, seed_model_profiles
@@ -10,6 +11,28 @@ VERSIONS = {
     'ltx-2.3': ('LTX-2.3-22B-distilled / comfy-bridge-v1', 'fp8 + Gemma fp4'),
     'minimax-h3-fl2va': ('H3-Base-FL2VA / comfy-bridge-v1', 'pruned-int8-convrot + Qwen nvfp4-awq'),
 }
+
+
+def _bridge_only_update(profile, command: list[str], version: str, quantization: str) -> bool:
+    """A safety-control bridge change does not invalidate prior image-quality benchmarks."""
+    old = profile.runtime_config_json.get("command") if isinstance(profile.runtime_config_json, dict) else None
+    if not isinstance(old, list) or profile.quantization != quantization:
+        return False
+    try:
+        old_index = old.index("--bridge-sha256") + 1
+        new_index = command.index("--bridge-sha256") + 1
+    except ValueError:
+        return False
+    if old_index != new_index or not re.fullmatch(r"[0-9a-f]{64}", str(old[old_index])):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{64}", str(command[new_index])):
+        return False
+    old_without_hash = [*old]
+    new_without_hash = [*command]
+    old_without_hash[old_index] = new_without_hash[new_index] = "<bridge-sha256>"
+    old_base = profile.model_version.rsplit(" / ", 1)[0]
+    new_base = version.rsplit(" / ", 1)[0]
+    return old_without_hash == new_without_hash and old_base == new_base
 
 
 def configure_profiles(session, *, python, ffmpeg, comfy_url='http://127.0.0.1:8188'):
@@ -24,7 +47,8 @@ def configure_profiles(session, *, python, ffmpeg, comfy_url='http://127.0.0.1:8
                    '--comfy-url', comfy_url, '--workflow-sha256', graph_hash, '--bridge-sha256', bridge_hash,
                    '--prompt={prompt}', '--negative-prompt={negative_prompt}',
                    '--output', '{output}', '--duration', '{duration}',
-                   '--aspect-ratio', '{aspect_ratio}', '--seed', '{seed}']
+                   '--aspect-ratio', '{aspect_ratio}', '--seed', '{seed}',
+                   '--quality', 'standard']
         if slug == 'wan-2.2':
             command += ['--ffmpeg', str(ffmpeg)]
         version, quantization = VERSIONS[slug]
@@ -32,7 +56,15 @@ def configure_profiles(session, *, python, ffmpeg, comfy_url='http://127.0.0.1:8
         profile = profiles[slug]
         if (profile.runtime_config_json != {'command': command} or profile.model_version != version
                 or profile.quantization != quantization or profile.provider != 'local'):
+            preserve_presets = _bridge_only_update(profile, command, version, quantization)
+            existing_presets = list(profile.validated_presets_json or []) if preserve_presets else []
             configure_local_profile(profile, command=command, version=version, quantization=quantization)
+            if existing_presets:
+                from .models import model_config_fingerprint
+                fingerprint = model_config_fingerprint(profile)
+                profile.validated_presets_json = [
+                    {**preset, "config_fingerprint": fingerprint} for preset in existing_presets
+                ]
         profile.enabled = True
         capabilities = dict(profile.capabilities_json or {})
         capabilities.update(deployment='local ComfyUI command bridge', modes=['text_to_video'],

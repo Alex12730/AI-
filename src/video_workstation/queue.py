@@ -117,6 +117,18 @@ class QueueService:
         if not retryable:
             task.finished_at = utcnow()
 
+    def defer_for_thermal(self, task: Task, *, lease_token: str | None = None) -> None:
+        if task.status != "running" or (lease_token is not None and task.lease_token != lease_token):
+            raise ValueError("任务租约已失效，不能执行温控暂停")
+        task.status = "queued"
+        task.error_class = "thermal_pause"
+        task.error_message = "GPU 达到 85℃，任务已安全暂停；降到 75℃并稳定后自动继续"
+        task.attempts = max(0, task.attempts - 1)
+        task.leased_by = None
+        task.lease_token = None
+        task.lease_expires_at = None
+        task.heartbeat_at = None
+
     def cancel(self, task: Task) -> None:
         if task.status not in {"queued", "retryable_failed"}:
             raise ValueError("只有等待或可重试失败的任务可以取消")

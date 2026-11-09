@@ -45,7 +45,7 @@ def _safe_text(value: str) -> str:
 def _message(level: str, status: dict, workstation_name: str, now: datetime) -> str:
     titles = {
         "warning": "GPU 高温预警",
-        "cooldown": "GPU 高温保护：暂停新任务",
+        "cooldown": "GPU 达到 85℃：全部任务已暂停",
         "emergency": "GPU 紧急高温",
         "emergency_repeat": "GPU 紧急高温持续中",
         "recovery_ready": "GPU 温度已恢复",
@@ -54,11 +54,11 @@ def _message(level: str, status: dict, workstation_name: str, now: datetime) -> 
     }
     actions = {
         "warning": "请检查机箱风道、风扇和室温。",
-        "cooldown": "工作台已暂停派发新的重型任务。",
-        "emergency": "工作台已锁定后续重型任务，请立即检查主机。",
+        "cooldown": "工作台已暂停全部任务，正在等待降温。",
+        "emergency": "工作台已暂停全部任务，请立即检查主机。",
         "emergency_repeat": "紧急高温仍未恢复，请立即检查主机。",
         "recovery_ready": "温度已满足恢复条件，请在工作台确认继续制作。",
-        "unavailable": "工作台无法取得可靠温度，新重型任务已暂停。",
+        "unavailable": "工作台无法取得可靠温度，全部任务已暂停。",
         "monitoring_restored": "温度读数已经恢复。",
     }
     temperature = status.get("temperature_c")

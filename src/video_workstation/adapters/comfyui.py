@@ -20,10 +20,16 @@ WORKFLOWS = Path(__file__).resolve().parents[3] / 'config' / 'workflows'
 MODELS = ('wan-2.2', 'ltx-2.3', 'minimax-h3-fl2va')
 
 
+class ThermalPause(RuntimeError):
+    """The workstation temperature lock asked this owned prompt to stop safely."""
+
+
 def build_graph(model, *, prompt, negative_prompt, duration, aspect_ratio, seed,
-                preview, output_prefix, workflow_sha256=None):
+                preview, output_prefix, workflow_sha256=None, quality='standard'):
     if model not in MODELS or aspect_ratio not in ('16:9', '9:16'):
         raise ValueError('Unsupported model or aspect ratio')
+    if quality not in ('standard', 'premium'):
+        raise ValueError('Unsupported quality preset')
     if not math.isfinite(duration) or not 0 < duration <= (15 if model == MODELS[2] else 20):
         raise ValueError('Invalid duration')
     if not 0 <= seed < 2**64:
@@ -40,9 +46,10 @@ def build_graph(model, *, prompt, negative_prompt, duration, aspect_ratio, seed,
         graph['115']['inputs'].update(aspect_ratio='16:9 (Widescreen)' if aspect_ratio == '16:9' else '9:16 (Portrait Widescreen)', megapixels=.1 if preview else 1.032)
         graph['140:131']['inputs'].update(prompt=prompt, length=frames)
         graph['140:129']['inputs']['noise_seed'] = seed
-        graph['140:137']['inputs']['value'] = 2 if preview else 50
-        # Base mode: turbo LoRA is intentionally disabled.
-        graph['140:139']['inputs']['value'] = False
+        # Standard is the queue-safe automation preset. Premium keeps the
+        # original 50-step base model available for manually supervised shots.
+        graph['140:137']['inputs']['value'] = 2 if preview else (8 if quality == 'standard' else 50)
+        graph['140:139']['inputs']['value'] = False if preview else quality == 'standard'
     else:
         width, height = ((320, 192) if preview else (1280, 704)) if model == MODELS[0] else ((256, 256) if preview else (1024, 576))
         if aspect_ratio == '9:16':
@@ -88,7 +95,8 @@ class ComfyClient:
             # Error bodies can echo prompts; do not log them.
             raise RuntimeError(f'ComfyUI HTTP error {exc.code}') from exc
 
-    def generate(self, graph, output: Path, *, timeout=6900, poll_interval=2):
+    def generate(self, graph, output: Path, *, timeout=6900, poll_interval=2,
+                 thermal_status_path: Path | None = None):
         deadline = time.monotonic() + timeout
         submitted = self.request('/prompt', {'prompt': graph, 'client_id': str(uuid.uuid4())})
         if submitted.get('node_errors') or not submitted.get('prompt_id'):
@@ -119,6 +127,10 @@ class ComfyClient:
                     temporary.write_bytes(data)
                     os.replace(temporary, output)
                     return prompt_id
+                if thermal_status_path is not None:
+                    from ..thermal import read_thermal_status
+                    if read_thermal_status(thermal_status_path).get('locked'):
+                        raise ThermalPause('THERMAL_PAUSE: GPU temperature protection is active')
                 time.sleep(min(poll_interval, max(0, deadline - time.monotonic())))
             raise RuntimeError('ComfyUI generation timed out')
         except BaseException:
@@ -153,6 +165,7 @@ def main(argv=None):
     parser.add_argument('--aspect-ratio', choices=('16:9', '9:16'), required=True)
     parser.add_argument('--seed', type=int, required=True)
     parser.add_argument('--preview', action='store_true', help='Small integration test; never a production benchmark')
+    parser.add_argument('--quality', choices=('standard', 'premium'), default='standard')
     parser.add_argument('--workflow-sha256')
     parser.add_argument('--bridge-sha256')
     parser.add_argument('--ffmpeg', default='ffmpeg')
@@ -169,10 +182,13 @@ def main(argv=None):
         graph = build_graph(args.model, prompt=args.prompt, negative_prompt=args.negative_prompt,
                             duration=args.duration, aspect_ratio=args.aspect_ratio, seed=args.seed,
                             preview=args.preview, output_prefix='workstation/' + uuid.uuid4().hex,
-                            workflow_sha256=args.workflow_sha256)
+                            workflow_sha256=args.workflow_sha256, quality=args.quality)
         if args.model == MODELS[0] and not shutil.which(args.ffmpeg):
             raise ValueError('FFmpeg is required for the Wan silent audio track')
-        client.generate(graph, raw, timeout=args.timeout)
+        thermal_status_path = None
+        if os.getenv('VIDEO_WORKSTATION_THERMAL_MONITOR') == '1' and os.getenv('VIDEO_WORKSTATION_DATA_DIR'):
+            thermal_status_path = Path(os.environ['VIDEO_WORKSTATION_DATA_DIR']).resolve() / 'thermal-status.json'
+        client.generate(graph, raw, timeout=args.timeout, thermal_status_path=thermal_status_path)
         if args.model == MODELS[0]:
             add_silent_audio(raw, staging, args.ffmpeg)
         else:

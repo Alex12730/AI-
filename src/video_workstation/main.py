@@ -4,6 +4,7 @@ import secrets
 import hashlib
 import json
 import mimetypes
+from datetime import datetime
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import quote
@@ -802,6 +803,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"level": "disabled", "locked": False, "temperature_c": None,
                     "message": "温度监测未启用", "monitor_enabled": False}
         return read_thermal_status(settings.data_dir / "thermal-status.json") | {"monitor_enabled": True}
+
+    @app.get("/api/thermal/export.xlsx")
+    def api_thermal_export(day: str | None = None, user: User = Depends(current_user)):
+        from .thermal import CHINA_TIME, export_thermal_xlsx
+        selected = day or datetime.now(CHINA_TIME).date().isoformat()
+        try:
+            content = export_thermal_xlsx(settings.data_dir, selected)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="gpu-temperature-{selected}.xlsx"'},
+        )
 
     @app.post("/api/thermal/resume")
     def api_thermal_resume(user: User = Depends(current_user), session: Session = Depends(session_dependency)):

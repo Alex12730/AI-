@@ -43,7 +43,7 @@ def test_state_transitions_send_once_and_never_repeat_five_second_samples(tmp_pa
     notifier.tick(thermal("recovery_ready", 73), NOW + timedelta(minutes=5))
     assert len(sender.messages) == 3
     assert "高温预警" in sender.messages[0] and "81℃" in sender.messages[0]
-    assert "暂停新任务" in sender.messages[1] and "86℃" in sender.messages[1]
+    assert "暂停全部任务" in sender.messages[1] and "86℃" in sender.messages[1]
     assert "温度已恢复" in sender.messages[2] and "73℃" in sender.messages[2]
     assert all("视频主机" in message for message in sender.messages)
 

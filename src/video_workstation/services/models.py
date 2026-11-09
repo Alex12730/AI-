@@ -197,9 +197,15 @@ def record_benchmark(
             if type(run.get(key)) is not bool:
                 raise ValueError(f"基准字段 {key} 必须是布尔值")
         if run["success"]:
-            for key in ("elapsed_seconds", "vram_peak_gb", "system_ram_peak_gb", "temperature_c", "av_sync_score"):
+            for key in ("elapsed_seconds", "vram_peak_gb", "system_ram_peak_gb", "temperature_c"):
                 if not isinstance(run.get(key), (int, float)):
                     raise ValueError(f"成功样本缺少数值指标: {key}")
+            if run.get("av_sync_applicable", True):
+                score = run.get("av_sync_score")
+                if not isinstance(score, (int, float)) or not 0 <= score <= 1:
+                    raise ValueError("成功样本缺少有效音画同步分数")
+            elif not isinstance(run.get("av_sync_reason"), str) or not run["av_sync_reason"].strip():
+                raise ValueError("音画同步不适用时必须记录原因")
     success_count = sum(run["success"] for run in runs)
     has_blocking_failure = any(run["oom"] or run["corrupt"] for run in runs)
     qualified = len(runs) == 10 and success_count / 10 >= 0.9 and not has_blocking_failure

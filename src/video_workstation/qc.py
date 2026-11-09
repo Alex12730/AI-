@@ -53,25 +53,28 @@ def parse_ffprobe(payload: dict[str, Any], *, expected_duration: float, require_
 
 
 def probe_media(path: Path, *, expected_duration: float, require_audio: bool = True, ffprobe_bin: str = "ffprobe") -> QCResult:
-    completed = subprocess.run(
-        [
-            ffprobe_bin,
-            "-v",
-            "error",
-            "-show_streams",
-            "-show_format",
-            "-of",
-            "json",
-            str(path),
-        ],
-        shell=False,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe_bin,
+                "-v",
+                "error",
+                "-show_streams",
+                "-show_format",
+                "-of",
+                "json",
+                str(path),
+            ],
+            shell=False,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return QCResult(passed=False, errors=["ffprobe_unavailable"])
     if completed.returncode != 0:
         return QCResult(passed=False, errors=["corrupt_file"])
     try:

@@ -74,13 +74,17 @@ class LocalCommandAdapter:
             )
         if completed.returncode != 0:
             raw = completed.stderr or completed.stdout or ""
-            error_class = "oom" if "out of memory" in raw.lower() else "infrastructure"
+            lowered = raw.lower()
+            error_class = ("thermal_pause" if "thermal_pause:" in lowered else
+                           "oom" if "out of memory" in lowered else "infrastructure")
+            message = ("GPU 达到 85℃，当前任务已安全暂停并等待降温" if error_class == "thermal_pause"
+                       else f"本地模型进程退出码 {completed.returncode}")
             return AdapterResult(
                 success=False,
                 output_path=request.output_path,
                 argv=argv,
                 error_class=error_class,
-                error_message=f"本地模型进程退出码 {completed.returncode}",
+                error_message=message,
             )
         if not request.output_path.exists():
             return AdapterResult(

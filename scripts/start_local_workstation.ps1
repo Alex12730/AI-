@@ -43,6 +43,7 @@ if (-not $env:VIDEO_WORKSTATION_SESSION_SECRET) {
 if ($env:VIDEO_WORKSTATION_SESSION_SECRET.Length -lt 24) { throw '工作站会话密钥太短。' }
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 $env:VIDEO_WORKSTATION_THERMAL_MONITOR = '1'
+$env:VIDEO_WORKSTATION_THERMAL_AUTO_RESUME = '1'
 $logDirectory = Join-Path $dataDirectory 'service-logs'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 function Stop-OwnedTree([int]$rootProcessId) {
@@ -61,7 +62,7 @@ $monitorProcesses = Get-CimInstance Win32_Process | Where-Object {
 if ($monitorProcesses) {
     $monitorVersion = 0
     try { $monitorVersion = (Get-Content -LiteralPath (Join-Path $dataDirectory 'thermal-status.json') -Raw -Encoding UTF8 | ConvertFrom-Json).monitor_version } catch {}
-    if ($monitorVersion -ne 5) {
+    if ($monitorVersion -ne 8) {
         foreach ($oldMonitor in $monitorProcesses) { Stop-OwnedTree $oldMonitor.ProcessId }
         Start-Sleep -Seconds 1
         $monitorProcesses = @()
@@ -73,7 +74,7 @@ if (-not $monitorProcesses) {
 }
 Start-Sleep -Seconds 1
 if (-not (Test-Path -LiteralPath (Join-Path $dataDirectory 'thermal-status.json'))) {
-    Write-Warning '温度监测尚未产生读数；新重型任务会等待监测恢复。'
+    Write-Warning '温度监测尚未产生读数；全部任务会等待监测恢复。'
 }
 $wecomSecretPath = Join-Path $dataDirectory 'secrets/wecom-webhook.dpapi'
 $wecomConfigured = Test-Path -LiteralPath $wecomSecretPath
@@ -135,7 +136,7 @@ if (Test-Path -LiteralPath $webMarker) {
 $matchingWebProcess = $ownedWebProcess -and $webRuntime.listen_address -eq $ListenAddress
 try {
     $health = Get-LocalHealth
-    $webReady = $health.status -eq 'ok' -and $health.thermal_monitor_enabled -eq $true -and $health.runtime_version -eq 5 -and $matchingWebProcess
+    $webReady = $health.status -eq 'ok' -and $health.thermal_monitor_enabled -eq $true -and $health.runtime_version -eq 8 -and $matchingWebProcess
 } catch {}
 if (-not $webReady) {
     if ($ownedWebProcess) {
@@ -149,7 +150,7 @@ if (-not $webReady) {
     if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) { throw '8000 端口已被其他服务占用。' }
     $web = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'uvicorn', 'video_workstation.main:application', '--factory', '--host', $ListenAddress, '--port', '8000') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'web.stdout.log') -RedirectStandardError (Join-Path $logDirectory 'web.stderr.log')
     $web.Id | Set-Content -LiteralPath (Join-Path $logDirectory 'web.pid')
-    @{pid=$web.Id; instance_id=$webInstanceId; listen_address=$ListenAddress; runtime_version=5} | ConvertTo-Json -Compress | Set-Content -LiteralPath $webMarker -Encoding UTF8
+    @{pid=$web.Id; instance_id=$webInstanceId; listen_address=$ListenAddress; runtime_version=8} | ConvertTo-Json -Compress | Set-Content -LiteralPath $webMarker -Encoding UTF8
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Seconds 1
         try {
@@ -170,7 +171,7 @@ if ($workerProcesses) {
         try {
             $runtimeInfo = Get-Content -LiteralPath $workerMarker -Raw -Encoding UTF8 | ConvertFrom-Json
             $runtimeProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($runtimeInfo.pid)"
-            $workerVerified = $runtimeInfo.thermal_monitor_enabled -eq $true -and $runtimeInfo.runtime_version -eq 5 -and $runtimeProcess.CommandLine -match 'video_workstation\.cli\s+worker'
+            $workerVerified = $runtimeInfo.thermal_monitor_enabled -eq $true -and $runtimeInfo.runtime_version -eq 8 -and $runtimeProcess.CommandLine -match 'video_workstation\.cli\s+worker'
             if ($workerVerified) {
                 $ownedWorkerIds = @($runtimeProcess.ProcessId, $runtimeProcess.ParentProcessId)
                 if (@($workerProcesses | Where-Object { $ownedWorkerIds -notcontains $_.ProcessId }).Count -gt 0) {
@@ -211,7 +212,7 @@ if ($ListenAddress -eq '0.0.0.0') {
     }
 }
 Write-Output '模型引擎：http://127.0.0.1:8188；需要单独保持 ComfyUI 运行。'
-Write-Output '温度监测：后台每五秒采样；高温或监测失联时暂停派发新重型任务。'
+Write-Output '温度监测：后台每五秒采样；达到 85℃ 或监测失联时暂停全部任务，降到 75℃并稳定 120 秒后自动续作。'
 if ($wecomConfigured) {
     Write-Output '企业微信提醒：已配置，后台通知进程已启动。'
 } else {

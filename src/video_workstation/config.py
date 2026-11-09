@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-RUNTIME_VERSION = 5
+RUNTIME_VERSION = 8
 
 
 def _default_data_dir() -> Path:
@@ -25,6 +25,7 @@ class Settings:
     maximum_video_upload_bytes: int = 4 * 1024**3
     worker_id: str = field(default_factory=lambda: os.getenv("VIDEO_WORKSTATION_WORKER_ID", "gpu-worker-1"))
     thermal_monitor_enabled: bool = field(default_factory=lambda: os.getenv("VIDEO_WORKSTATION_THERMAL_MONITOR", "0") == "1")
+    thermal_auto_resume: bool = field(default_factory=lambda: os.getenv("VIDEO_WORKSTATION_THERMAL_AUTO_RESUME", "0") == "1")
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir).resolve()

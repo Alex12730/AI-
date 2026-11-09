@@ -86,6 +86,21 @@ if (thermalStrip) {
       if (sampled) sampled.textContent = `最近采样：${status.last_sample_at || "暂无"}`;
       const dailyMax = document.querySelector("[data-thermal-daily-max]");
       if (dailyMax) dailyMax.textContent = status.daily_max_c == null ? "暂无数据" : `${status.daily_max_c}℃`;
+      const cooldownElapsed = document.querySelector("[data-thermal-cooldown-elapsed]");
+      if (cooldownElapsed) cooldownElapsed.textContent = status.cooldown_elapsed_seconds == null ? "未触发" : `${status.cooldown_elapsed_seconds} 秒`;
+      const coolingStarted = document.querySelector("[data-thermal-cooling-started]");
+      if (coolingStarted) coolingStarted.textContent = status.cooling_started_at || "—";
+      const to75 = document.querySelector("[data-thermal-to-75]");
+      if (to75) to75.textContent = status.seconds_to_75 == null ? "尚未达到" : `${status.seconds_to_75} 秒`;
+      const stable = document.querySelector("[data-thermal-stable]");
+      if (stable) stable.textContent = `${status.stable_cooling_seconds || 0} / 120 秒`;
+      const resumeIn = document.querySelector("[data-thermal-resume-in]");
+      if (resumeIn) resumeIn.textContent = status.locked ? `还需 ${status.resume_in_seconds || 0} 秒` : "当前无需等待";
+      const lastCycle = document.querySelector("[data-thermal-last-cycle]");
+      if (lastCycle) {
+        const cycle = status.last_cooling_cycle;
+        lastCycle.textContent = cycle && cycle.seconds_to_75 != null ? `${cycle.seconds_to_75} 秒到75℃` : "暂无记录";
+      }
       const chart = document.querySelector("[data-thermal-chart]");
       if (chart) {
         chart.replaceChildren();

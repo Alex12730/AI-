@@ -12,7 +12,17 @@ from video_workstation.models import ModelProfile, Project, Task, User
 from video_workstation.queue import QueueService
 from video_workstation.worker import Worker
 from video_workstation.services.system_status import GPUStatus, ProbeResult
-from video_workstation.thermal import ThermalState, acquire_monitor_lock, load_thermal_state, read_thermal_status, thermal_dispatch_allowed
+from video_workstation.thermal import (
+    ThermalState,
+    _write_atomic,
+    acquire_monitor_lock,
+    append_cooling_cycle,
+    append_temperature_history,
+    export_thermal_xlsx,
+    load_thermal_state,
+    read_thermal_status,
+    thermal_dispatch_allowed,
+)
 
 
 BASE = datetime(2026, 10, 29, 0, 0, tzinfo=timezone.utc)
@@ -107,18 +117,56 @@ def test_safe_worker_stop_checks_running_tasks_under_sqlite_lock(tmp_path, monke
 def test_transient_heat_and_manual_recovery():
     state = ThermalState()
     state.sample(reading(85), BASE)
+    assert state.level == "cooldown" and state.locked
     state.sample(reading(79), BASE + timedelta(seconds=5))
-    assert state.level == "normal"
-    for seconds in range(10, 41, 5):
-        state.sample(reading(85), BASE + timedelta(seconds=seconds))
-    assert state.locked
-    for seconds in range(45, 165, 5):
+    assert state.level == "cooldown" and state.locked
+    for seconds in range(10, 130, 5):
         state.sample(reading(74), BASE + timedelta(seconds=seconds))
     assert not state.recovery_ready
-    state.sample(reading(74), BASE + timedelta(seconds=165))
+    state.sample(reading(74), BASE + timedelta(seconds=130))
     assert state.recovery_ready and state.locked
-    assert state.resume(BASE + timedelta(seconds=165))
+    assert state.to_dict()["seconds_to_75"] == 10
+    assert state.resume(BASE + timedelta(seconds=130))
     assert state.level == "normal" and not state.locked
+    assert state.to_dict()["stable_cooling_seconds"] == 0
+    assert state.cooling_cycles[-1]["seconds_to_75"] == 10
+
+
+def test_auto_recovery_resumes_only_after_stable_cooldown():
+    state = ThermalState()
+    for seconds in range(0, 35, 5):
+        state.sample(reading(85), BASE + timedelta(seconds=seconds), auto_resume=True)
+    assert state.locked
+    for seconds in range(40, 160, 5):
+        state.sample(reading(74), BASE + timedelta(seconds=seconds), auto_resume=True)
+    assert state.locked
+    state.sample(reading(74), BASE + timedelta(seconds=160), auto_resume=True)
+    assert state.level == "normal"
+    assert not state.locked and not state.recovery_ready
+
+
+def test_temperature_history_and_excel_export(tmp_path):
+    state = ThermalState()
+    state.sample(reading(85), BASE)
+    append_temperature_history(tmp_path, state, BASE)
+    state.sample(reading(75), BASE + timedelta(seconds=25))
+    append_temperature_history(tmp_path, state, BASE + timedelta(seconds=25))
+    state.recovery_since = BASE + timedelta(seconds=25)
+    state.last_good_at = BASE + timedelta(seconds=145)
+    state.last_sample_at = BASE + timedelta(seconds=145)
+    state.temperature_c = 75
+    state.recovery_ready = True
+    assert state.resume(BASE + timedelta(seconds=145))
+    append_cooling_cycle(tmp_path, state.cooling_cycles[-1])
+
+    payload = export_thermal_xlsx(tmp_path, "2026-10-29")
+    assert payload.startswith(b"PK")
+    from openpyxl import load_workbook
+    from io import BytesIO
+    workbook = load_workbook(BytesIO(payload), read_only=True)
+    assert workbook.sheetnames == ["温度采样", "降温周期"]
+    assert workbook["温度采样"].max_row == 3
+    assert workbook["降温周期"][2][3].value == 25
 
 
 def test_stale_and_bad_monitor_file_block_dispatch(tmp_path):
@@ -154,6 +202,27 @@ def test_second_monitor_cannot_acquire_same_data_directory(tmp_path):
         handle.close()
 
 
+def test_atomic_status_write_retries_transient_windows_permission_error(tmp_path, monkeypatch):
+    path = tmp_path / "thermal-status.json"
+    path.write_text('{"old":true}', encoding="utf-8")
+    real_replace = os.replace
+    attempts = 0
+
+    def transient_replace(source, target):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporarily locked")
+        return real_replace(source, target)
+
+    monkeypatch.setattr("video_workstation.thermal.os.replace", transient_replace)
+    monkeypatch.setattr("video_workstation.thermal.time.sleep", lambda _: None)
+    _write_atomic(path, {"new": True})
+    assert attempts == 3
+    assert json.loads(path.read_text(encoding="utf-8")) == {"new": True}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_unavailable_reading_never_looks_like_zero_or_clears_lock():
     state = ThermalState()
     for seconds in range(0, 31, 5):
@@ -173,7 +242,7 @@ def test_single_failed_sensor_sample_has_fifteen_second_grace():
     assert state.level == "unavailable" and state.locked
 
 
-def test_heat_lock_skips_heavy_task_but_allows_local_writing(tmp_path):
+def test_queue_filter_can_still_select_local_writing_when_only_heavy_is_disabled(tmp_path):
     db = Database(Settings(data_dir=tmp_path, session_secret="x" * 32))
     db.create_schema()
     with db.session() as session:

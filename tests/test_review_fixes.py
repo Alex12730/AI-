@@ -83,7 +83,7 @@ def test_worker_dispatches_compose_task_and_registers_composite(tmp_path, monkey
         task = create_compose_task(session, admin, project, asset_ids=[asset.id], subtitle_asset_id=None, aspect_ratio="16:9", priority=1, settings=db.settings, upscale=True)
         task_id = task.id
 
-    def fake_execute(request):
+    def fake_execute(request, **_kwargs):
         request.output_path.write_bytes(b"composite")
         return AdapterResult(True, request.output_path, metadata={"expected_duration": 1})
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
@@ -13,6 +14,33 @@ from .offline import validate_offline_profile
 
 
 DELIVERY_SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920)}
+
+
+def _run_cancelable(argv: list[str], *, timeout: int, cancel_check: Callable[[], bool] | None,
+                    run: Callable = subprocess.run):
+    if cancel_check is None or run is not subprocess.run:
+        return run(argv, shell=False, check=False, capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=timeout)
+    process = subprocess.Popen(argv, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            stdout, stderr = process.communicate(timeout=.5)
+            return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            if cancel_check():
+                process.terminate()
+                try:
+                    stdout, stderr = process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate(timeout=10)
+                return subprocess.CompletedProcess(argv, 75, stdout, (stderr or "") + "\nTHERMAL_PAUSE")
+            if time.monotonic() >= deadline:
+                process.kill()
+                process.communicate()
+                raise subprocess.TimeoutExpired(argv, timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +162,7 @@ def execute_compose(
     ffmpeg_bin: str = "ffmpeg",
     ffprobe_bin: str = "ffprobe",
     timeout_seconds: int = 4 * 60 * 60,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> AdapterResult:
     try:
         for path in request.input_paths:
@@ -145,7 +174,11 @@ def execute_compose(
         resolved = replace(request, input_durations=durations, input_has_audio=has_audio)
         argv = build_compose_argv(resolved, ffmpeg_bin=ffmpeg_bin)
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
-        completed = run(argv, shell=False, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_seconds)
+        completed = _run_cancelable(argv, timeout=timeout_seconds, cancel_check=cancel_check, run=run)
+        if completed.returncode == 75 and "THERMAL_PAUSE" in (completed.stderr or ""):
+            request.output_path.unlink(missing_ok=True)
+            return AdapterResult(False, request.output_path, argv=argv, error_class="thermal_pause",
+                                 error_message="GPU 达到 85℃，合成任务已暂停")
         if completed.returncode != 0 or not request.output_path.is_file():
             request.output_path.unlink(missing_ok=True)
             return AdapterResult(False, request.output_path, argv=argv, error_class="infrastructure", error_message="本地 FFmpeg 合成失败")
@@ -171,6 +204,7 @@ def execute_video2x(
     scale: int = 2,
     run: Callable = subprocess.run,
     timeout_seconds: int = 4 * 60 * 60,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> AdapterResult:
     try:
         validate_offline_profile(profile)
@@ -185,7 +219,11 @@ def execute_video2x(
         if not input_path.is_file():
             raise ValueError("超分输入不存在")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        completed = run(argv, shell=False, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+        completed = _run_cancelable(argv, timeout=timeout_seconds, cancel_check=cancel_check, run=run)
+        if completed.returncode == 75 and "THERMAL_PAUSE" in (completed.stderr or ""):
+            output_path.unlink(missing_ok=True)
+            return AdapterResult(False, output_path, argv=argv, error_class="thermal_pause",
+                                 error_message="GPU 达到 85℃，超分任务已暂停")
         if completed.returncode != 0 or not output_path.is_file():
             output_path.unlink(missing_ok=True)
             return AdapterResult(False, output_path, argv=argv, error_class="infrastructure", error_message="本地 Video2X 执行失败")
